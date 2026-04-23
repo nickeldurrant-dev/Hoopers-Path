@@ -284,6 +284,7 @@ setTimeout(function() {
 </script>
 
 <script src="./drills-data.js"></script>
+<script src="./diagrams.js"></script>
 
 <script type="module">
 function showErr(stage, err) {
@@ -512,6 +513,10 @@ function Slider({ label, value, onChange, min, max, step, display, accent }) {
 }
 
 function DrillModal({ drill, onClose }) {
+  // Render the SVG diagram for this drill. Fallback to a nice placeholder if none exists.
+  const diagramFn = window.HOOPERS_DIAGRAMS && window.HOOPERS_DIAGRAMS[drill.id];
+  const diagramHTML = diagramFn ? diagramFn() : null;
+
   return html`
     <div class="modal-backdrop fade-in" onClick=${onClose}>
       <div class="modal-content slide-up" onClick=${e => e.stopPropagation()}>
@@ -524,13 +529,15 @@ function DrillModal({ drill, onClose }) {
             <h3 class="font-display text-3xl text-chalk leading-tight">${drill.name}</h3>
             <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mt-1">${drill.baseReps}</div>
           </div>
-          ${drill.video ? html`
-            <div class="aspect-video bg-court rounded-xl overflow-hidden border">
-              <iframe src=${drill.video} class="w-full h-full" frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope"
-                allowfullscreen></iframe>
+          ${diagramHTML ? html`
+            <div class="rounded-xl overflow-hidden border" style="background:var(--court)" dangerouslySetInnerHTML=${{ __html: diagramHTML }}></div>
+          ` : html`
+            <div class="rounded-xl overflow-hidden border p-6 text-center" style="background:var(--court)">
+              <div class="text-4xl mb-2">📐</div>
+              <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Diagram coming soon</div>
+              <div class="text-xs text-chalk-50 mt-2">Read the description below for now</div>
             </div>
-          ` : null}
+          `}
           <div class="bg-court rounded-xl p-4 border">
             <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-1">How to do it</div>
             <p class="text-chalk text-sm" style="opacity:0.9">${drill.description}</p>
