@@ -152,6 +152,32 @@ tailwind.config = {
 <body class="court-bg grain min-h-screen">
 
 <div id="root"></div>
+<div id="error-display" style="display:none; position:fixed; top:0; left:0; right:0; background:#ff6b1a; color:#0a0e1a; padding:20px; font-family:monospace; font-size:12px; z-index:9999; white-space:pre-wrap; max-height:50vh; overflow:auto;"></div>
+
+<script>
+// Catch early errors before React boots
+window.addEventListener('error', function(e) {
+  var el = document.getElementById('error-display');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = 'ERROR: ' + e.message + '\n\nFile: ' + e.filename + '\nLine: ' + e.lineno + ':' + e.colno + '\n\n' + (e.error && e.error.stack ? e.error.stack : '');
+  }
+});
+window.addEventListener('unhandledrejection', function(e) {
+  var el = document.getElementById('error-display');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = 'PROMISE ERROR: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '\n\n' + (e.reason && e.reason.stack ? e.reason.stack : '');
+  }
+});
+// Show a loading indicator until React mounts
+setTimeout(function() {
+  var root = document.getElementById('root');
+  if (root && !root.hasChildNodes()) {
+    root.innerHTML = '<div style="padding:40px;text-align:center;color:#f5f1e8;font-family:sans-serif;"><div style="font-size:24px;color:#ff6b1a;">Loading Hooper\'s Path...</div><div style="font-size:12px;color:#888;margin-top:12px;">If this persists, check the browser console for errors.</div></div>';
+  }
+}, 500);
+</script>
 
 <script src="./drills-data.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
