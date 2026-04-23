@@ -1,0 +1,1718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Hooper's Path</title>
+<meta name="theme-color" content="#ff6b1a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Hoopers" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%230a0e1a'/><circle cx='96' cy='96' r='60' fill='none' stroke='%23ff6b1a' stroke-width='8'/><path d='M36 96 L156 96 M96 36 L96 156 M54 54 Q96 96 54 138 M138 54 Q96 96 138 138' stroke='%23ff6b1a' stroke-width='6' fill='none'/></svg>" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Archivo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: {
+        display: ['"Bebas Neue"', 'sans-serif'],
+        sans: ['Archivo', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
+      colors: {
+        court: '#0a0e1a',
+        courtlight: '#141a2c',
+        courtbord: '#1f2940',
+        flame: '#ff6b1a',
+        flamedark: '#d14f0a',
+        lime: '#b4ff3a',
+        chalk: '#f5f1e8',
+      }
+    }
+  }
+}
+</script>
+
+<style>
+  html, body {
+    background: #0a0e1a;
+    color: #f5f1e8;
+    font-family: 'Archivo', sans-serif;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .font-display { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.02em; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Court texture background */
+  .court-bg {
+    background:
+      radial-gradient(ellipse at top, rgba(255,107,26,0.08), transparent 50%),
+      radial-gradient(ellipse at bottom, rgba(180,255,58,0.04), transparent 50%),
+      linear-gradient(#0a0e1a, #0a0e1a);
+  }
+
+  /* Grain overlay */
+  .grain::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none;
+    opacity: 0.04; z-index: 100;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Scoreboard digit style */
+  .scoreboard {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Bottom tab bar safe area */
+  .tab-bar {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
+  }
+
+  /* Slide in animation */
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .slide-up { animation: slideUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .fade-in { animation: fadeIn 0.25s ease-out both; }
+
+  @keyframes pop {
+    0% { transform: scale(0.8); opacity: 0; }
+    60% { transform: scale(1.05); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+  .pop { animation: pop 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  /* Glowing flame border */
+  .flame-border {
+    box-shadow: 0 0 0 1px rgba(255,107,26,0.3), 0 0 24px -8px rgba(255,107,26,0.4);
+  }
+
+  /* Stripe */
+  .stripe-bg {
+    background-image: repeating-linear-gradient(
+      45deg,
+      rgba(255,107,26,0.08) 0px,
+      rgba(255,107,26,0.08) 2px,
+      transparent 2px,
+      transparent 8px
+    );
+  }
+
+  /* Range slider styling */
+  input[type="range"] {
+    -webkit-appearance: none;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    background: #1f2940;
+    border-radius: 3px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 24px;
+    width: 24px;
+    border-radius: 50%;
+    background: #ff6b1a;
+    margin-top: -9px;
+    border: 2px solid #0a0e1a;
+  }
+
+  /* Hide scrollbar on horizontal scrolls */
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Button press feedback */
+  button:active { transform: scale(0.97); }
+  button { transition: transform 0.1s ease; }
+
+  /* Locked badge */
+  .locked { filter: grayscale(1) brightness(0.4); }
+</style>
+</head>
+<body class="court-bg grain min-h-screen">
+
+<div id="root"></div>
+
+<script src="./drills-data.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const { BASKETBALL_DRILLS, STRENGTH_DRILLS, WEEKLY_TEMPLATE, PREGAME_WARMUP, POSTGAME_RECOVERY, BADGES } = window.HOOPERS_DATA;
+const ALL_DRILLS = [...BASKETBALL_DRILLS, ...STRENGTH_DRILLS];
+
+// ============================================================
+// STORAGE LAYER - IndexedDB wrapper for history, localStorage for settings
+// ============================================================
+const DB_NAME = 'hoopers-path';
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('workouts')) {
+        db.createObjectStore('workouts', { keyPath: 'date' });
+      }
+      if (!db.objectStoreNames.contains('games')) {
+        db.createObjectStore('games', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains('checkins')) {
+        db.createObjectStore('checkins', { keyPath: 'date' });
+      }
+    };
+  });
+}
+
+async function idbPut(store, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).put(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(store, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGetAll(store) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbAdd(store, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).add(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Settings in localStorage
+const getSettings = () => {
+  try {
+    return JSON.parse(localStorage.getItem('hp_settings') || '{}');
+  } catch { return {}; }
+};
+const setSettings = (s) => localStorage.setItem('hp_settings', JSON.stringify(s));
+
+const getPRs = () => {
+  try {
+    return JSON.parse(localStorage.getItem('hp_prs') || '{}');
+  } catch { return {}; }
+};
+const storePRs = (p) => localStorage.setItem('hp_prs', JSON.stringify(p));
+
+const getUnlockedBadges = () => {
+  try {
+    return JSON.parse(localStorage.getItem('hp_badges') || '{}');
+  } catch { return {}; }
+};
+const setUnlockedBadges = (b) => localStorage.setItem('hp_badges', JSON.stringify(b));
+
+// ============================================================
+// DATE HELPERS
+// ============================================================
+const todayStr = () => {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+};
+const dateStr = (d) => d.toISOString().slice(0, 10);
+const dayName = (date = new Date()) => {
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  return days[date.getDay()];
+};
+const daysBetween = (s1, s2) => {
+  const d1 = new Date(s1 + 'T00:00:00');
+  const d2 = new Date(s2 + 'T00:00:00');
+  return Math.round((d2 - d1) / 86400000);
+};
+
+// ============================================================
+// WORKOUT GENERATOR
+// ============================================================
+function pickDrills(category, count, pool, filter) {
+  let available = pool.filter(d => d.category === category);
+  if (filter) {
+    const ids = filter.split(',');
+    available = available.filter(d => ids.includes(d.id));
+  }
+  if (available.length === 0) return [];
+  const shuffled = [...available].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, available.length));
+}
+
+function generateWorkout(day, fatigueMod = null) {
+  let template = WEEKLY_TEMPLATE[day];
+  if (!template) return null;
+
+  // Apply fatigue adjustments
+  if (fatigueMod === 'swap-strength') {
+    // Replace strength blocks with mobility
+    template = {
+      ...template,
+      title: template.title + " (Adjusted)",
+      blocks: template.blocks.map(b => {
+        if (b.category === 'lower' || b.category === 'upper' || b.category === 'plyo') {
+          return { ...b, category: 'mobility', label: 'Mobility (swapped)' };
+        }
+        return b;
+      }),
+    };
+  } else if (fatigueMod === 'upper-only') {
+    template = {
+      ...template,
+      title: template.title + " (Upper Only)",
+      blocks: template.blocks.map(b => {
+        if (b.category === 'lower' || b.category === 'plyo') {
+          return { ...b, category: 'upper', label: 'Upper (swapped)' };
+        }
+        return b;
+      }),
+    };
+  }
+
+  const sections = template.blocks.map(block => {
+    const drills = pickDrills(block.category, block.count, ALL_DRILLS, block.filter);
+    return { ...block, drills };
+  });
+
+  return { ...template, sections };
+}
+
+// ============================================================
+// BADGE EVALUATION
+// ============================================================
+function evaluateBadges(stats, currentUnlocked) {
+  const newly = [];
+  for (const badge of BADGES) {
+    if (currentUnlocked[badge.id]) continue;
+    const c = badge.condition;
+    let unlock = false;
+    switch (c.type) {
+      case 'streak': unlock = stats.streak >= c.value; break;
+      case 'workouts': unlock = stats.workoutCount >= c.value; break;
+      case 'ftMade': unlock = stats.ftMade >= c.value; break;
+      case 'ftPct': unlock = stats.bestFtPct >= c.value; break;
+      case 'pushupsTotal': unlock = stats.pushupsTotal >= c.value; break;
+      case 'pullupPR': unlock = stats.pullupPR >= c.value; break;
+      case 'gamesPlayed': unlock = stats.gamesPlayed >= c.value; break;
+      case 'sleepStreak': unlock = stats.sleepStreak >= c.value; break;
+      case 'checkins': unlock = stats.checkinCount >= c.value; break;
+    }
+    if (unlock) newly.push(badge);
+  }
+  return newly;
+}
+
+// ============================================================
+// MAIN APP
+// ============================================================
+function App() {
+  const [tab, setTab] = useState('today');
+  const [workouts, setWorkouts] = useState([]);
+  const [games, setGames] = useState([]);
+  const [checkins, setCheckins] = useState([]);
+  const [prs, setPRs] = useState(getPRs());
+  const [badges, setBadges] = useState(getUnlockedBadges());
+  const [settings, setSettingsState] = useState(getSettings());
+  const [newBadge, setNewBadge] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load data
+  useEffect(() => {
+    (async () => {
+      try {
+        const [w, g, c] = await Promise.all([
+          idbGetAll('workouts'),
+          idbGetAll('games'),
+          idbGetAll('checkins'),
+        ]);
+        setWorkouts(w || []);
+        setGames(g || []);
+        setCheckins(c || []);
+      } catch (e) { console.error('Load error:', e); }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Register SW
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(e => console.log('SW:', e));
+    }
+  }, []);
+
+  // Compute stats
+  const stats = useMemo(() => {
+    const completed = workouts.filter(w => w.completed);
+    const streak = computeStreak(workouts, checkins);
+    const ftMade = completed.reduce((a, w) => a + (w.ftMade || 0), 0);
+    const pushupsTotal = completed.reduce((a, w) => a + (w.pushupsTotal || 0), 0);
+    const bestFtPct = Math.max(0, ...completed.map(w => w.ftPct || 0));
+    const sleepStreak = computeSleepStreak(checkins);
+    return {
+      streak,
+      workoutCount: completed.length,
+      ftMade,
+      pushupsTotal,
+      bestFtPct,
+      pullupPR: prs.maxPullups || 0,
+      gamesPlayed: games.length,
+      sleepStreak,
+      checkinCount: checkins.length,
+    };
+  }, [workouts, games, checkins, prs]);
+
+  // Check for new badges
+  useEffect(() => {
+    const newly = evaluateBadges(stats, badges);
+    if (newly.length > 0) {
+      const updated = { ...badges };
+      newly.forEach(b => { updated[b.id] = { unlockedAt: todayStr() }; });
+      setBadges(updated);
+      setUnlockedBadges(updated);
+      setNewBadge(newly[0]);
+    }
+  }, [stats]);
+
+  const saveWorkout = async (workout) => {
+    await idbPut('workouts', workout);
+    const all = await idbGetAll('workouts');
+    setWorkouts(all);
+  };
+  const saveGame = async (game) => {
+    await idbAdd('games', game);
+    const all = await idbGetAll('games');
+    setGames(all);
+  };
+  const saveCheckin = async (ci) => {
+    await idbPut('checkins', ci);
+    const all = await idbGetAll('checkins');
+    setCheckins(all);
+  };
+  const savePRs = (next) => {
+    setPRs(next);
+    storePRs(next);
+  };
+  const saveSettings = (s) => {
+    setSettingsState(s);
+    setSettings(s);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="font-display text-flame text-5xl animate-pulse">LOADING</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen pb-24">
+      {newBadge && (
+        <BadgeUnlock badge={newBadge} onClose={() => setNewBadge(null)} />
+      )}
+
+      <div className="max-w-md mx-auto">
+        <Header streak={stats.streak} name={settings.name} />
+
+        <main className="px-4 fade-in">
+          {tab === 'today' && (
+            <TodayTab
+              workouts={workouts}
+              checkins={checkins}
+              prs={prs}
+              settings={settings}
+              saveWorkout={saveWorkout}
+              saveCheckin={saveCheckin}
+              savePRs={savePRs}
+              saveGame={saveGame}
+              games={games}
+            />
+          )}
+          {tab === 'drills' && <DrillsTab />}
+          {tab === 'progress' && (
+            <ProgressTab
+              workouts={workouts}
+              games={games}
+              checkins={checkins}
+              prs={prs}
+              stats={stats}
+            />
+          )}
+          {tab === 'badges' && <BadgesTab unlocked={badges} />}
+          {tab === 'settings' && (
+            <SettingsTab
+              settings={settings}
+              saveSettings={saveSettings}
+              workouts={workouts}
+              games={games}
+            />
+          )}
+        </main>
+      </div>
+
+      <TabBar tab={tab} setTab={setTab} />
+    </div>
+  );
+}
+
+// ============================================================
+// STREAK COMPUTATION
+// ============================================================
+function computeStreak(workouts, checkins) {
+  // A day counts if: workout completed, OR it's a game day with game logged, OR recovery logged on a rest day
+  const activeDays = new Set();
+  workouts.forEach(w => { if (w.completed) activeDays.add(w.date); });
+  checkins.forEach(c => { if (c.recoveryLogged) activeDays.add(c.date); });
+
+  let streak = 0;
+  let d = new Date();
+  // Allow today to be unchecked without breaking streak - start from yesterday if today not logged
+  if (!activeDays.has(dateStr(d))) {
+    d.setDate(d.getDate() - 1);
+  }
+  while (activeDays.has(dateStr(d))) {
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+function computeSleepStreak(checkins) {
+  const sorted = [...checkins].sort((a, b) => b.date.localeCompare(a.date));
+  let streak = 0;
+  for (const c of sorted) {
+    if ((c.sleepHours || 0) >= 8) streak++;
+    else break;
+  }
+  return streak;
+}
+
+// ============================================================
+// HEADER
+// ============================================================
+function Header({ streak, name }) {
+  return (
+    <header className="px-4 pt-6 pb-4">
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
+          <h1 className="font-display text-4xl text-chalk leading-none mt-1">
+            {name ? `What's up, ${name}` : "Let's work"}
+          </h1>
+        </div>
+        <div className="text-right">
+          <div className="font-display text-5xl text-flame leading-none scoreboard">{streak}</div>
+          <div className="font-mono text-[10px] text-chalk/60 uppercase tracking-widest mt-1">Day Streak</div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ============================================================
+// TAB BAR
+// ============================================================
+function TabBar({ tab, setTab }) {
+  const tabs = [
+    { id: 'today', label: 'Today', icon: '🏀' },
+    { id: 'drills', label: 'Drills', icon: '📋' },
+    { id: 'progress', label: 'Stats', icon: '📊' },
+    { id: 'badges', label: 'Trophy', icon: '🏆' },
+    { id: 'settings', label: 'More', icon: '⚙️' },
+  ];
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 bg-courtlight/95 backdrop-blur border-t border-courtbord tab-bar z-50">
+      <div className="max-w-md mx-auto flex">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 ${tab === t.id ? 'text-flame' : 'text-chalk/50'}`}
+          >
+            <span className="text-xl">{t.icon}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider">{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+// ============================================================
+// TODAY TAB - main screen
+// ============================================================
+function TodayTab({ workouts, checkins, prs, settings, saveWorkout, saveCheckin, savePRs, saveGame, games }) {
+  const today = todayStr();
+  const day = dayName();
+  const todayCheckin = checkins.find(c => c.date === today);
+  const todayWorkout = workouts.find(w => w.date === today);
+
+  const [view, setView] = useState('home'); // home | checkin | workout | gameday | logGame
+
+  // Auto-prompt check-in first thing
+  useEffect(() => {
+    if (!todayCheckin && view === 'home') {
+      setView('checkin');
+    }
+  }, []);
+
+  const template = WEEKLY_TEMPLATE[day];
+  const isGameDay = template.type === 'gameday';
+
+  if (view === 'checkin') {
+    return <CheckIn
+      existing={todayCheckin}
+      onSave={async (ci) => { await saveCheckin(ci); setView('home'); }}
+      onSkip={() => setView('home')}
+    />;
+  }
+
+  if (view === 'workout') {
+    return <WorkoutView
+      workout={todayWorkout}
+      day={day}
+      checkin={todayCheckin}
+      onSave={async (w) => { await saveWorkout(w); setView('home'); }}
+      onPRUpdate={savePRs}
+      prs={prs}
+      onExit={() => setView('home')}
+    />;
+  }
+
+  if (view === 'gameday') {
+    return <GameDayView
+      onLogGame={() => setView('logGame')}
+      onExit={() => setView('home')}
+    />;
+  }
+
+  if (view === 'logGame') {
+    return <LogGame
+      onSave={async (g) => { await saveGame(g); await saveWorkout({ date: today, completed: true, type: 'game', day }); setView('home'); }}
+      onCancel={() => setView('home')}
+    />;
+  }
+
+  return <TodayHome
+    today={today}
+    day={day}
+    template={template}
+    isGameDay={isGameDay}
+    todayCheckin={todayCheckin}
+    todayWorkout={todayWorkout}
+    onStartCheckin={() => setView('checkin')}
+    onStartWorkout={() => setView('workout')}
+    onGameDay={() => setView('gameday')}
+    onLogGame={() => setView('logGame')}
+    onTakeRest={async () => {
+      await saveWorkout({
+        date: today,
+        completed: true,
+        type: 'rest',
+        day,
+      });
+    }}
+    workouts={workouts}
+  />;
+}
+
+// ============================================================
+// TODAY HOME
+// ============================================================
+function TodayHome({ today, day, template, isGameDay, todayCheckin, todayWorkout, onStartCheckin, onStartWorkout, onGameDay, onLogGame, onTakeRest, workouts }) {
+  const dateObj = new Date();
+  const dateDisplay = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+  // Recent forced-rest: if last 6 days all trained, suggest rest
+  const recent7 = workouts.filter(w => {
+    const days = daysBetween(w.date, today);
+    return days >= 0 && days <= 6 && w.completed && w.type !== 'rest';
+  });
+  const needsRest = recent7.length >= 6;
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-5 flame-border">
+        <div className="flex items-center justify-between mb-1">
+          <div className="font-mono text-xs text-flame uppercase tracking-widest">{dateDisplay}</div>
+          {todayWorkout?.completed && (
+            <span className="bg-lime/20 text-lime px-2 py-0.5 rounded-full font-mono text-[10px] uppercase tracking-wider">Done ✓</span>
+          )}
+        </div>
+        <h2 className="font-display text-3xl text-chalk leading-tight">{template.title}</h2>
+        {template.duration > 0 && (
+          <div className="font-mono text-xs text-chalk/60 mt-1">~ {template.duration} min</div>
+        )}
+      </div>
+
+      {!todayCheckin && (
+        <button
+          onClick={onStartCheckin}
+          className="w-full bg-flame text-courtlight rounded-2xl p-5 text-left slide-up"
+        >
+          <div className="font-mono text-xs uppercase tracking-widest">Step 1</div>
+          <div className="font-display text-2xl mt-1">Morning Check-In</div>
+          <div className="text-sm opacity-80 mt-1">10 seconds. Helps us adjust today's work.</div>
+        </button>
+      )}
+
+      {needsRest && !todayWorkout && (
+        <div className="bg-lime/10 border border-lime/30 rounded-2xl p-4">
+          <div className="font-mono text-xs text-lime uppercase tracking-widest">⚠ Recovery Alert</div>
+          <div className="text-sm text-chalk mt-1">You've trained 6 days in a row. Your body adapts during rest, not during work. Take a full rest day.</div>
+          <button onClick={onTakeRest} className="mt-3 bg-lime text-courtlight px-4 py-2 rounded-lg font-mono text-xs uppercase tracking-wider">Take Rest Day</button>
+        </div>
+      )}
+
+      {isGameDay && !todayWorkout?.completed && (
+        <div className="space-y-3">
+          <button
+            onClick={onGameDay}
+            className="w-full bg-gradient-to-br from-flame to-flamedark text-chalk rounded-2xl p-6 text-left stripe-bg flame-border slide-up"
+          >
+            <div className="font-mono text-xs uppercase tracking-widest opacity-80">Game Day</div>
+            <div className="font-display text-4xl mt-1">Pre-Game Warm-Up</div>
+            <div className="text-sm opacity-90 mt-2">Get activated. Get focused.</div>
+          </button>
+          <button
+            onClick={onLogGame}
+            className="w-full bg-courtlight border border-courtbord rounded-2xl p-4 text-left"
+          >
+            <div className="font-display text-xl text-chalk">Log a Game</div>
+            <div className="text-xs text-chalk/60 mt-1">Post-game stats and recovery checklist</div>
+          </button>
+        </div>
+      )}
+
+      {!isGameDay && todayCheckin && !todayWorkout?.completed && (
+        <button
+          onClick={onStartWorkout}
+          className="w-full bg-gradient-to-br from-flame to-flamedark text-chalk rounded-2xl p-6 text-left flame-border slide-up"
+        >
+          <div className="font-mono text-xs uppercase tracking-widest opacity-80">Today's Work</div>
+          <div className="font-display text-4xl mt-1">Start Training</div>
+          <div className="text-sm opacity-90 mt-2">{template.blocks.length} blocks · {template.duration} min</div>
+        </button>
+      )}
+
+      {!isGameDay && !todayWorkout?.completed && (
+        <button
+          onClick={onTakeRest}
+          className="w-full bg-courtlight border border-courtbord rounded-2xl p-4 text-left"
+        >
+          <div className="font-display text-xl text-chalk">I Need a Rest Day</div>
+          <div className="text-xs text-chalk/60 mt-1">Won't break your streak. Recovery is training too.</div>
+        </button>
+      )}
+
+      {todayWorkout?.completed && (
+        <div className="bg-lime/10 border border-lime/30 rounded-2xl p-5 text-center pop">
+          <div className="text-5xl mb-2">🔥</div>
+          <div className="font-display text-2xl text-chalk">Locked in for today</div>
+          <div className="text-sm text-chalk/70 mt-1">Come back tomorrow. Consistency is the game.</div>
+        </div>
+      )}
+
+      {/* Game logging always available */}
+      {!isGameDay && (
+        <button
+          onClick={onLogGame}
+          className="w-full bg-courtlight border border-courtbord rounded-2xl p-4 text-left"
+        >
+          <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider">Had a game today?</div>
+          <div className="text-sm text-chalk mt-1">Log stats →</div>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// MORNING CHECK-IN
+// ============================================================
+function CheckIn({ existing, onSave, onSkip }) {
+  const [sleep, setSleep] = useState(existing?.sleepHours || 8);
+  const [soreness, setSoreness] = useState(existing?.soreness || 3);
+  const [soreLegs, setSoreLegs] = useState(existing?.soreLegs || false);
+  const [energy, setEnergy] = useState(existing?.energy || 7);
+  const [nutrition, setNutrition] = useState(existing?.nutrition || 'good');
+
+  const submit = () => {
+    onSave({
+      date: todayStr(),
+      sleepHours: sleep,
+      soreness,
+      soreLegs,
+      energy,
+      nutrition,
+      recoveryLogged: true,
+    });
+  };
+
+  return (
+    <div className="space-y-5 fade-in">
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Morning Check-In</div>
+        <h2 className="font-display text-3xl text-chalk">How you feelin'?</h2>
+      </div>
+
+      <Slider
+        label="Sleep last night"
+        value={sleep}
+        onChange={setSleep}
+        min={4} max={12} step={0.5}
+        display={`${sleep} hours`}
+        accent={sleep >= 8 ? 'lime' : 'flame'}
+      />
+
+      <Slider
+        label="Soreness"
+        value={soreness}
+        onChange={setSoreness}
+        min={1} max={10} step={1}
+        display={soreness <= 3 ? 'Feeling good' : soreness <= 6 ? 'A bit sore' : 'Really sore'}
+        accent={soreness <= 5 ? 'lime' : 'flame'}
+      />
+
+      {soreness > 4 && (
+        <div className="bg-courtlight border border-courtbord rounded-xl p-4 slide-up">
+          <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-2">Where?</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSoreLegs(false)}
+              className={`flex-1 py-2 rounded-lg font-mono text-xs uppercase ${!soreLegs ? 'bg-flame text-courtlight' : 'bg-courtbord text-chalk/70'}`}
+            >Upper Body</button>
+            <button
+              onClick={() => setSoreLegs(true)}
+              className={`flex-1 py-2 rounded-lg font-mono text-xs uppercase ${soreLegs ? 'bg-flame text-courtlight' : 'bg-courtbord text-chalk/70'}`}
+            >Legs</button>
+          </div>
+        </div>
+      )}
+
+      <Slider
+        label="Energy"
+        value={energy}
+        onChange={setEnergy}
+        min={1} max={10} step={1}
+        display={energy >= 7 ? 'Ready to go' : energy >= 4 ? 'Decent' : 'Low battery'}
+        accent={energy >= 6 ? 'lime' : 'flame'}
+      />
+
+      <div>
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-2">Yesterday's nutrition</div>
+        <div className="flex gap-2">
+          {['good', 'meh', 'bad'].map(n => (
+            <button
+              key={n}
+              onClick={() => setNutrition(n)}
+              className={`flex-1 py-3 rounded-xl font-mono text-xs uppercase ${nutrition === n ? 'bg-flame text-courtlight' : 'bg-courtlight border border-courtbord text-chalk/70'}`}
+            >{n === 'good' ? '👍 Good' : n === 'meh' ? '😐 Meh' : '👎 Bad'}</button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        onClick={submit}
+        className="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl"
+      >Save Check-In</button>
+      <button onClick={onSkip} className="w-full text-chalk/50 font-mono text-xs uppercase tracking-wider py-2">Skip for now</button>
+    </div>
+  );
+}
+
+function Slider({ label, value, onChange, min, max, step, display, accent }) {
+  return (
+    <div>
+      <div className="flex justify-between items-baseline mb-2">
+        <span className="font-mono text-xs text-chalk/60 uppercase tracking-wider">{label}</span>
+        <span className={`font-display text-xl ${accent === 'lime' ? 'text-lime' : 'text-flame'}`}>{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min} max={max} step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        className="w-full"
+      />
+    </div>
+  );
+}
+
+// ============================================================
+// WORKOUT VIEW
+// ============================================================
+function WorkoutView({ workout, day, checkin, onSave, onPRUpdate, prs, onExit }) {
+  // Determine fatigue mod
+  let fatigueMod = null;
+  if (checkin) {
+    if (checkin.energy <= 3 || checkin.soreness >= 8) fatigueMod = 'swap-strength';
+    else if (checkin.soreness >= 6 && checkin.soreLegs) fatigueMod = 'upper-only';
+  }
+
+  const [generated] = useState(() => generateWorkout(day, fatigueMod));
+  const [completed, setCompleted] = useState({});
+  const [drillPRs, setDrillPRs] = useState({});
+  const [showDrill, setShowDrill] = useState(null);
+
+  const totalDrills = generated.sections.reduce((a, s) => a + s.drills.length, 0);
+  const doneCount = Object.values(completed).filter(Boolean).length;
+  const pct = totalDrills > 0 ? Math.round((doneCount / totalDrills) * 100) : 0;
+  const allDone = doneCount === totalDrills && totalDrills > 0;
+
+  const toggleDrill = (id) => {
+    setCompleted(c => ({ ...c, [id]: !c[id] }));
+  };
+
+  const finishWorkout = () => {
+    // Compute totals and save
+    let ftMade = 0, ftAttempts = 0, pushupsTotal = 0;
+    const newPRs = { ...prs };
+
+    Object.entries(drillPRs).forEach(([did, data]) => {
+      const drill = ALL_DRILLS.find(d => d.id === did);
+      if (!drill) return;
+      if (drill.id === 'sh2' && data.made != null) {
+        ftMade += parseInt(data.made) || 0;
+        ftAttempts += parseInt(data.att) || 0;
+      }
+      if (drill.id === 'u1' && data.value != null) {
+        pushupsTotal += parseInt(data.value) || 0;
+        const n = parseInt(data.value) || 0;
+        if (n > (newPRs.maxPushups || 0)) newPRs.maxPushups = n;
+      }
+      if (drill.trackPR && data.value != null) {
+        const n = parseFloat(data.value);
+        if (isNaN(n)) return;
+        const cur = newPRs[drill.trackPR];
+        // lower-is-better for times
+        const lowerBetter = ['mileTime', 'suicideTime'].includes(drill.trackPR);
+        if (cur == null || (lowerBetter ? n < cur : n > cur)) {
+          newPRs[drill.trackPR] = n;
+        }
+      }
+    });
+
+    const ftPct = ftAttempts > 0 ? Math.round((ftMade / ftAttempts) * 100) : 0;
+
+    onPRUpdate(newPRs);
+    onSave({
+      date: todayStr(),
+      completed: true,
+      type: 'training',
+      day,
+      drillsCompleted: Object.keys(completed).filter(k => completed[k]),
+      ftMade,
+      ftAttempts,
+      ftPct,
+      pushupsTotal,
+      drillData: drillPRs,
+    });
+  };
+
+  return (
+    <div className="space-y-4 fade-in">
+      <button onClick={onExit} className="font-mono text-xs text-chalk/60 uppercase tracking-wider">← back</button>
+
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Today's Work</div>
+        <h2 className="font-display text-3xl text-chalk">{generated.title}</h2>
+        {fatigueMod && (
+          <div className="mt-2 bg-lime/10 border border-lime/30 rounded-lg p-2 text-xs text-lime font-mono">
+            ⚡ Auto-adjusted based on your check-in
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      <div className="bg-courtlight border border-courtbord rounded-full h-3 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-flame to-lime transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between font-mono text-xs text-chalk/60 uppercase tracking-wider">
+        <span>{doneCount} / {totalDrills} done</span>
+        <span>{pct}%</span>
+      </div>
+
+      {/* Sections */}
+      {generated.sections.map((section, i) => (
+        <div key={i} className="bg-courtlight border border-courtbord rounded-2xl p-4">
+          <div className="font-mono text-xs text-flame uppercase tracking-widest mb-3">
+            Block {i + 1} · {section.label}
+          </div>
+          <div className="space-y-2">
+            {section.drills.map(d => (
+              <DrillRow
+                key={d.id}
+                drill={d}
+                done={completed[d.id]}
+                onToggle={() => toggleDrill(d.id)}
+                onInfo={() => setShowDrill(d)}
+                prData={drillPRs[d.id]}
+                setPRData={(data) => setDrillPRs(p => ({ ...p, [d.id]: data }))}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <button
+        onClick={finishWorkout}
+        disabled={doneCount === 0}
+        className={`w-full font-display text-2xl py-4 rounded-2xl ${
+          doneCount === 0
+            ? 'bg-courtlight text-chalk/30 border border-courtbord'
+            : allDone
+              ? 'bg-lime text-courtlight'
+              : 'bg-flame text-courtlight'
+        }`}
+      >
+        {allDone ? '🔥 Finish & Save' : doneCount === 0 ? 'Complete drills to finish' : 'Save Progress'}
+      </button>
+
+      {showDrill && <DrillModal drill={showDrill} onClose={() => setShowDrill(null)} />}
+    </div>
+  );
+}
+
+function DrillRow({ drill, done, onToggle, onInfo, prData, setPRData }) {
+  const needsInput = drill.id === 'sh2' || drill.id === 'sh7' || (drill.trackPR && drill.id !== 'sh2');
+
+  return (
+    <div className={`rounded-xl border transition-all ${done ? 'bg-lime/10 border-lime/30' : 'bg-court border-courtbord'}`}>
+      <div className="flex items-center p-3 gap-3">
+        <button
+          onClick={onToggle}
+          className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 ${
+            done ? 'bg-lime border-lime' : 'border-chalk/30'
+          }`}
+        >
+          {done && <span className="text-courtlight text-sm font-bold">✓</span>}
+        </button>
+        <button onClick={onInfo} className="flex-1 text-left min-w-0">
+          <div className={`font-display text-lg leading-tight ${done ? 'text-lime' : 'text-chalk'}`}>{drill.name}</div>
+          <div className="font-mono text-[10px] text-chalk/50 uppercase tracking-wider">{drill.baseReps}</div>
+        </button>
+        <button onClick={onInfo} className="text-chalk/40 text-xs font-mono uppercase">info</button>
+      </div>
+
+      {done && needsInput && (
+        <div className="px-3 pb-3 pt-1 border-t border-lime/20 slide-up">
+          {drill.id === 'sh2' ? (
+            <div className="flex gap-2 items-center">
+              <span className="font-mono text-xs text-chalk/60 uppercase">FT:</span>
+              <input
+                type="number"
+                placeholder="made"
+                className="w-16 bg-court border border-courtbord rounded px-2 py-1 text-sm text-chalk"
+                value={prData?.made || ''}
+                onChange={e => setPRData({ ...(prData || {}), made: e.target.value })}
+              />
+              <span className="text-chalk/40">/</span>
+              <input
+                type="number"
+                placeholder="att"
+                className="w-16 bg-court border border-courtbord rounded px-2 py-1 text-sm text-chalk"
+                value={prData?.att || ''}
+                onChange={e => setPRData({ ...(prData || {}), att: e.target.value })}
+              />
+            </div>
+          ) : drill.id === 'u1' ? (
+            <div className="flex gap-2 items-center">
+              <span className="font-mono text-xs text-chalk/60 uppercase">Total push-ups:</span>
+              <input
+                type="number"
+                placeholder="e.g. 45"
+                className="w-20 bg-court border border-courtbord rounded px-2 py-1 text-sm text-chalk"
+                value={prData?.value || ''}
+                onChange={e => setPRData({ ...(prData || {}), value: e.target.value })}
+              />
+            </div>
+          ) : drill.trackPR ? (
+            <div className="flex gap-2 items-center">
+              <span className="font-mono text-xs text-chalk/60 uppercase">
+                {drill.trackPR === 'maxPullups' ? 'Pull-ups:' :
+                 drill.trackPR === 'mileTime' ? 'Time (min):' :
+                 drill.trackPR === 'suicideTime' ? 'Best time (sec):' :
+                 drill.trackPR === 'vertical' ? 'Vertical (in):' :
+                 drill.trackPR === 'plankHold' ? 'Hold (sec):' : 'Result:'}
+              </span>
+              <input
+                type="number"
+                step="0.1"
+                className="w-20 bg-court border border-courtbord rounded px-2 py-1 text-sm text-chalk"
+                value={prData?.value || ''}
+                onChange={e => setPRData({ ...(prData || {}), value: e.target.value })}
+              />
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// DRILL MODAL (video demo)
+// ============================================================
+function DrillModal({ drill, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-court/90 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in" onClick={onClose}>
+      <div
+        className="bg-courtlight w-full max-w-md rounded-t-3xl sm:rounded-3xl border-t sm:border border-courtbord max-h-[90vh] overflow-y-auto slide-up"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-courtlight border-b border-courtbord p-4 flex justify-between items-center">
+          <div className="font-mono text-xs text-flame uppercase tracking-widest">Drill</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-courtbord flex items-center justify-center text-chalk">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div>
+            <h3 className="font-display text-3xl text-chalk leading-tight">{drill.name}</h3>
+            <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mt-1">{drill.baseReps}</div>
+          </div>
+
+          {drill.video && (
+            <div className="aspect-video bg-court rounded-xl overflow-hidden border border-courtbord">
+              <iframe
+                src={drill.video}
+                className="w-full h-full"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope"
+                allowFullScreen
+              />
+            </div>
+          )}
+
+          <div className="bg-court rounded-xl p-4 border border-courtbord">
+            <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-1">How to do it</div>
+            <p className="text-chalk/90 text-sm">{drill.description}</p>
+          </div>
+
+          {drill.why && (
+            <div className="bg-flame/10 border border-flame/30 rounded-xl p-4">
+              <div className="font-mono text-xs text-flame uppercase tracking-wider mb-1">Why it matters</div>
+              <p className="text-chalk/90 text-sm">{drill.why}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// GAME DAY - pre-game warmup
+// ============================================================
+function GameDayView({ onLogGame, onExit }) {
+  const [done, setDone] = useState({});
+
+  return (
+    <div className="space-y-4 fade-in">
+      <button onClick={onExit} className="font-mono text-xs text-chalk/60 uppercase tracking-wider">← back</button>
+
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Game Day</div>
+        <h2 className="font-display text-3xl text-chalk">Pre-Game Warm-Up</h2>
+        <div className="text-sm text-chalk/70 mt-1">Run through this about 45 min before tip-off.</div>
+      </div>
+
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+        <div className="space-y-2">
+          {PREGAME_WARMUP.map((w, i) => (
+            <div key={i} className={`rounded-xl p-3 border transition-all ${done[i] ? 'bg-lime/10 border-lime/30' : 'bg-court border-courtbord'}`}>
+              <div className="flex items-start gap-3">
+                <button
+                  onClick={() => setDone(d => ({ ...d, [i]: !d[i] }))}
+                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${done[i] ? 'bg-lime border-lime' : 'border-chalk/30'}`}
+                >
+                  {done[i] && <span className="text-courtlight text-sm font-bold">✓</span>}
+                </button>
+                <div className="flex-1">
+                  <div className={`font-display text-lg leading-tight ${done[i] ? 'text-lime' : 'text-chalk'}`}>{w.name}</div>
+                  <div className="text-xs text-chalk/70 mt-1">{w.description}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-flame/10 border border-flame/30 rounded-2xl p-5 text-center">
+        <div className="font-display text-2xl text-chalk">Have a great game.</div>
+        <div className="text-sm text-chalk/70 mt-1">Play hard. Play smart. Have fun.</div>
+      </div>
+
+      <button
+        onClick={onLogGame}
+        className="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl"
+      >Log Game When Done →</button>
+    </div>
+  );
+}
+
+// ============================================================
+// LOG GAME
+// ============================================================
+function LogGame({ onSave, onCancel }) {
+  const [points, setPoints] = useState('');
+  const [rebounds, setRebounds] = useState('');
+  const [assists, setAssists] = useState('');
+  const [minutes, setMinutes] = useState('');
+  const [feltRating, setFeltRating] = useState(7);
+  const [notes, setNotes] = useState('');
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryDone, setRecoveryDone] = useState({});
+
+  const submit = () => {
+    onSave({
+      date: todayStr(),
+      points: parseInt(points) || 0,
+      rebounds: parseInt(rebounds) || 0,
+      assists: parseInt(assists) || 0,
+      minutes: parseInt(minutes) || 0,
+      feltRating,
+      notes,
+    });
+  };
+
+  if (showRecovery) {
+    return (
+      <div className="space-y-4 fade-in">
+        <button onClick={() => setShowRecovery(false)} className="font-mono text-xs text-chalk/60 uppercase tracking-wider">← back</button>
+        <div>
+          <div className="font-mono text-xs text-flame uppercase tracking-widest">Post-Game</div>
+          <h2 className="font-display text-3xl text-chalk">Recovery Checklist</h2>
+          <div className="text-sm text-chalk/70 mt-1">How you recover determines how you play next.</div>
+        </div>
+        <div className="bg-courtlight border border-courtbord rounded-2xl p-4 space-y-2">
+          {POSTGAME_RECOVERY.map((r, i) => (
+            <button
+              key={i}
+              onClick={() => setRecoveryDone(d => ({ ...d, [i]: !d[i] }))}
+              className={`w-full text-left p-3 rounded-xl border flex items-center gap-3 ${recoveryDone[i] ? 'bg-lime/10 border-lime/30' : 'bg-court border-courtbord'}`}
+            >
+              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${recoveryDone[i] ? 'bg-lime border-lime' : 'border-chalk/30'}`}>
+                {recoveryDone[i] && <span className="text-courtlight text-xs font-bold">✓</span>}
+              </div>
+              <span className={`text-sm ${recoveryDone[i] ? 'text-lime' : 'text-chalk'}`}>{r}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={submit} className="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Save Game</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 fade-in">
+      <button onClick={onCancel} className="font-mono text-xs text-chalk/60 uppercase tracking-wider">← back</button>
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Post-Game</div>
+        <h2 className="font-display text-3xl text-chalk">Log Your Game</h2>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <StatInput label="Points" value={points} setValue={setPoints} />
+        <StatInput label="Rebounds" value={rebounds} setValue={setRebounds} />
+        <StatInput label="Assists" value={assists} setValue={setAssists} />
+        <StatInput label="Minutes" value={minutes} setValue={setMinutes} />
+      </div>
+
+      <Slider
+        label="How'd it feel?"
+        value={feltRating}
+        onChange={setFeltRating}
+        min={1} max={10} step={1}
+        display={feltRating >= 8 ? 'In the zone' : feltRating >= 5 ? 'Solid' : 'Tough night'}
+        accent={feltRating >= 6 ? 'lime' : 'flame'}
+      />
+
+      <div>
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-2">Notes (optional)</div>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="What worked? What to work on?"
+          className="w-full bg-courtlight border border-courtbord rounded-xl p-3 text-sm text-chalk min-h-[80px]"
+        />
+      </div>
+
+      <button
+        onClick={() => setShowRecovery(true)}
+        className="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl"
+      >Next: Recovery →</button>
+    </div>
+  );
+}
+
+function StatInput({ label, value, setValue }) {
+  return (
+    <div className="bg-courtlight border border-courtbord rounded-xl p-3">
+      <div className="font-mono text-[10px] text-chalk/60 uppercase tracking-wider">{label}</div>
+      <input
+        type="number"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        className="w-full bg-transparent font-display text-3xl text-flame mt-1 outline-none scoreboard"
+        placeholder="0"
+      />
+    </div>
+  );
+}
+
+// ============================================================
+// DRILLS TAB - browse library
+// ============================================================
+function DrillsTab() {
+  const [type, setType] = useState('basketball');
+  const [filter, setFilter] = useState('all');
+  const [showDrill, setShowDrill] = useState(null);
+
+  const categories = type === 'basketball'
+    ? [['all', 'All'], ['ball-handling', 'Handling'], ['shooting', 'Shooting'], ['finishing', 'Finishing'], ['footwork', 'Footwork'], ['defense', 'Defense'], ['conditioning', 'Cardio']]
+    : [['all', 'All'], ['upper', 'Upper'], ['lower', 'Lower'], ['core', 'Core'], ['plyo', 'Plyo'], ['mobility', 'Mobility']];
+
+  const pool = type === 'basketball' ? BASKETBALL_DRILLS : STRENGTH_DRILLS;
+  const filtered = filter === 'all' ? pool : pool.filter(d => d.category === filter);
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Drill Library</div>
+        <h2 className="font-display text-3xl text-chalk">{BASKETBALL_DRILLS.length + STRENGTH_DRILLS.length} drills</h2>
+      </div>
+
+      <div className="flex gap-2 bg-courtlight border border-courtbord rounded-xl p-1">
+        {[['basketball', '🏀 Ball'], ['strength', '💪 Strength']].map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => { setType(k); setFilter('all'); }}
+            className={`flex-1 py-2 rounded-lg font-mono text-xs uppercase tracking-wider ${type === k ? 'bg-flame text-courtlight' : 'text-chalk/70'}`}
+          >{l}</button>
+        ))}
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto hide-scrollbar -mx-4 px-4">
+        {categories.map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            className={`shrink-0 px-3 py-1.5 rounded-full font-mono text-xs uppercase tracking-wider ${filter === k ? 'bg-flame text-courtlight' : 'bg-courtlight border border-courtbord text-chalk/70'}`}
+          >{l}</button>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        {filtered.map(d => (
+          <button
+            key={d.id}
+            onClick={() => setShowDrill(d)}
+            className="w-full text-left bg-courtlight border border-courtbord rounded-xl p-4 hover:border-flame/50"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="font-display text-xl text-chalk leading-tight">{d.name}</div>
+                <div className="text-xs text-chalk/70 mt-1 line-clamp-2">{d.description}</div>
+                <div className="flex gap-2 mt-2">
+                  <span className="font-mono text-[10px] text-flame uppercase tracking-wider">{d.baseReps}</span>
+                  <span className="font-mono text-[10px] text-chalk/40">· lvl {d.difficulty}</span>
+                </div>
+              </div>
+              <div className="text-2xl">▶</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {showDrill && <DrillModal drill={showDrill} onClose={() => setShowDrill(null)} />}
+    </div>
+  );
+}
+
+// ============================================================
+// PROGRESS TAB
+// ============================================================
+function ProgressTab({ workouts, games, checkins, prs, stats }) {
+  const recentWorkouts = workouts.filter(w => w.completed).slice(-14);
+  const recentGames = [...games].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+
+  // Compute weekly load - last 7 days
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const ds = dateStr(d);
+    const w = workouts.find(w => w.date === ds);
+    last7.push({
+      date: ds,
+      label: ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.getDay()],
+      completed: w?.completed,
+      type: w?.type,
+    });
+  }
+
+  const trainingDaysLast7 = last7.filter(d => d.completed && d.type === 'training').length;
+
+  // FT % trend
+  const ftData = workouts.filter(w => w.completed && w.ftPct > 0).slice(-10);
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Progress</div>
+        <h2 className="font-display text-3xl text-chalk">The Grind</h2>
+      </div>
+
+      {/* Big stats */}
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard label="Streak" value={stats.streak} suffix="days" big color="flame" />
+        <StatCard label="Workouts" value={stats.workoutCount} color="lime" />
+        <StatCard label="Games" value={stats.gamesPlayed} color="chalk" />
+        <StatCard label="FTs Made" value={stats.ftMade} color="chalk" />
+      </div>
+
+      {/* Last 7 days */}
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-3">Last 7 Days</div>
+        <div className="flex justify-between gap-1">
+          {last7.map((d, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div className="font-mono text-[10px] text-chalk/40 uppercase">{d.label}</div>
+              <div className={`w-full aspect-square rounded-lg flex items-center justify-center ${
+                d.completed
+                  ? d.type === 'game' ? 'bg-flame text-courtlight'
+                  : d.type === 'rest' ? 'bg-lime/30 text-lime border border-lime/50'
+                  : 'bg-lime text-courtlight'
+                  : 'bg-court border border-courtbord'
+              }`}>
+                {d.completed && <span className="text-xs">
+                  {d.type === 'game' ? '🏀' : d.type === 'rest' ? '💤' : '✓'}
+                </span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 font-mono text-xs text-chalk/60">
+          Training load: <span className={trainingDaysLast7 >= 5 ? 'text-flame' : 'text-lime'}>{trainingDaysLast7}/7 days</span>
+        </div>
+      </div>
+
+      {/* Personal Bests */}
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+        <div className="font-mono text-xs text-flame uppercase tracking-widest mb-3">Personal Bests</div>
+        <div className="grid grid-cols-2 gap-3">
+          <PRCard label="Max Push-ups" value={prs.maxPushups} unit="reps" />
+          <PRCard label="Max Pull-ups" value={prs.maxPullups} unit="reps" />
+          <PRCard label="Vertical" value={prs.vertical} unit="in" />
+          <PRCard label="Mile Time" value={prs.mileTime} unit="min" lowerBetter />
+          <PRCard label="Plank Hold" value={prs.plankHold} unit="sec" />
+          <PRCard label="Best FT%" value={stats.bestFtPct} unit="%" />
+        </div>
+      </div>
+
+      {/* FT Trend */}
+      {ftData.length >= 2 && (
+        <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+          <div className="font-mono text-xs text-flame uppercase tracking-widest mb-3">Free Throw %</div>
+          <MiniChart data={ftData.map(w => ({ x: w.date, y: w.ftPct }))} unit="%" />
+        </div>
+      )}
+
+      {/* Recent games */}
+      {recentGames.length > 0 && (
+        <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+          <div className="font-mono text-xs text-flame uppercase tracking-widest mb-3">Recent Games</div>
+          <div className="space-y-2">
+            {recentGames.map((g, i) => (
+              <div key={g.id || i} className="flex items-center justify-between p-3 bg-court rounded-xl border border-courtbord">
+                <div>
+                  <div className="font-mono text-[10px] text-chalk/50 uppercase">{g.date}</div>
+                  <div className="font-display text-lg text-chalk mt-0.5">
+                    {g.points} PTS · {g.rebounds} REB · {g.assists} AST
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-display text-2xl text-flame">{g.feltRating}</div>
+                  <div className="font-mono text-[10px] text-chalk/40 uppercase">/10 felt</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {stats.workoutCount === 0 && (
+        <div className="bg-courtlight border border-courtbord rounded-2xl p-6 text-center">
+          <div className="text-4xl mb-2">📊</div>
+          <div className="font-display text-xl text-chalk">No data yet</div>
+          <div className="text-sm text-chalk/60 mt-1">Complete your first workout to see stats here.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, suffix, color, big }) {
+  const colorClass = color === 'flame' ? 'text-flame' : color === 'lime' ? 'text-lime' : 'text-chalk';
+  return (
+    <div className="bg-courtlight border border-courtbord rounded-2xl p-4">
+      <div className="font-mono text-[10px] text-chalk/60 uppercase tracking-wider">{label}</div>
+      <div className="flex items-baseline gap-1 mt-1">
+        <div className={`font-display scoreboard ${big ? 'text-5xl' : 'text-4xl'} ${colorClass}`}>{value}</div>
+        {suffix && <div className="font-mono text-xs text-chalk/50">{suffix}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PRCard({ label, value, unit, lowerBetter }) {
+  return (
+    <div className="bg-court border border-courtbord rounded-xl p-3">
+      <div className="font-mono text-[10px] text-chalk/60 uppercase tracking-wider">{label}</div>
+      <div className="flex items-baseline gap-1 mt-1">
+        <div className="font-display scoreboard text-2xl text-chalk">{value != null ? value : '—'}</div>
+        {value != null && <div className="font-mono text-[10px] text-chalk/50">{unit}</div>}
+      </div>
+    </div>
+  );
+}
+
+function MiniChart({ data, unit }) {
+  if (data.length < 2) return null;
+  const values = data.map(d => d.y);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = data.map((d, i) => {
+    const x = (i / (data.length - 1)) * 100;
+    const y = 100 - ((d.y - min) / range) * 80 - 10;
+    return `${x},${y}`;
+  });
+  const path = 'M ' + points.join(' L ');
+
+  return (
+    <div className="relative">
+      <div className="flex justify-between font-mono text-[10px] text-chalk/40 mb-1">
+        <span>Min: {min.toFixed(0)}{unit}</span>
+        <span>Max: {max.toFixed(0)}{unit}</span>
+      </div>
+      <svg viewBox="0 0 100 100" className="w-full h-24" preserveAspectRatio="none">
+        <path d={path} fill="none" stroke="#ff6b1a" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        {points.map((p, i) => {
+          const [x, y] = p.split(',').map(Number);
+          return <circle key={i} cx={x} cy={y} r="1.5" fill="#ff6b1a" vectorEffect="non-scaling-stroke" />;
+        })}
+      </svg>
+      <div className="font-mono text-[10px] text-chalk/40 text-center mt-1">Last {data.length} sessions</div>
+    </div>
+  );
+}
+
+// ============================================================
+// BADGES TAB
+// ============================================================
+function BadgesTab({ unlocked }) {
+  const unlockedCount = Object.keys(unlocked).length;
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Trophy Shelf</div>
+        <h2 className="font-display text-3xl text-chalk">{unlockedCount} / {BADGES.length}</h2>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {BADGES.map(b => {
+          const u = unlocked[b.id];
+          return (
+            <div
+              key={b.id}
+              className={`aspect-square bg-courtlight border rounded-2xl p-3 flex flex-col items-center justify-center text-center ${u ? 'border-flame/50 flame-border' : 'border-courtbord locked'}`}
+            >
+              <div className="text-4xl mb-1">{b.icon}</div>
+              <div className="font-display text-xs text-chalk leading-tight">{b.name}</div>
+              <div className="font-mono text-[8px] text-chalk/50 uppercase tracking-wider mt-1">{b.description}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// BADGE UNLOCK POPUP
+// ============================================================
+function BadgeUnlock({ badge, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 4500);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-court/80 backdrop-blur-sm fade-in" onClick={onClose}>
+      <div className="bg-gradient-to-br from-flame to-flamedark rounded-3xl p-8 max-w-xs text-center pop border-4 border-chalk/10">
+        <div className="font-mono text-xs text-chalk uppercase tracking-widest opacity-80">Badge Unlocked</div>
+        <div className="text-7xl my-4">{badge.icon}</div>
+        <div className="font-display text-3xl text-chalk leading-tight">{badge.name}</div>
+        <div className="text-sm text-chalk/90 mt-2">{badge.description}</div>
+        <button onClick={onClose} className="mt-6 bg-courtlight text-chalk px-6 py-2 rounded-full font-mono text-xs uppercase tracking-wider">Let's Go 🔥</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SETTINGS TAB
+// ============================================================
+function SettingsTab({ settings, saveSettings, workouts, games }) {
+  const [name, setName] = useState(settings.name || '');
+  const [saved, setSaved] = useState(false);
+
+  const save = () => {
+    saveSettings({ ...settings, name });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const exportData = async () => {
+    const [w, g, c] = await Promise.all([
+      idbGetAll('workouts'),
+      idbGetAll('games'),
+      idbGetAll('checkins'),
+    ]);
+    const data = {
+      exportedAt: new Date().toISOString(),
+      settings: getSettings(),
+      prs: getPRs(),
+      badges: getUnlockedBadges(),
+      workouts: w,
+      games: g,
+      checkins: c,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hoopers-path-backup-${todayStr()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearAll = async () => {
+    if (!confirm('Erase all workouts, games, badges, and PRs? This cannot be undone.')) return;
+    localStorage.clear();
+    const db = await openDB();
+    await Promise.all(['workouts', 'games', 'checkins'].map(store => new Promise((res, rej) => {
+      const tx = db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).clear();
+      req.onsuccess = () => res();
+      req.onerror = () => rej(req.error);
+    })));
+    location.reload();
+  };
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div>
+        <div className="font-mono text-xs text-flame uppercase tracking-widest">Settings</div>
+        <h2 className="font-display text-3xl text-chalk">More</h2>
+      </div>
+
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4 space-y-3">
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider">Your Name</div>
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="What should we call you?"
+          className="w-full bg-court border border-courtbord rounded-xl p-3 text-chalk"
+        />
+        <button onClick={save} className="bg-flame text-courtlight px-4 py-2 rounded-lg font-mono text-xs uppercase tracking-wider">
+          {saved ? 'Saved ✓' : 'Save'}
+        </button>
+      </div>
+
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4 space-y-2">
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-2">Your Data</div>
+        <div className="text-sm text-chalk/80">
+          {workouts.length} workouts · {games.length} games logged
+        </div>
+        <div className="text-xs text-chalk/50">All data stored locally on this device.</div>
+        <button onClick={exportData} className="w-full bg-court border border-courtbord text-chalk px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider mt-2">
+          📥 Export Backup (JSON)
+        </button>
+      </div>
+
+      <div className="bg-courtlight border border-courtbord rounded-2xl p-4 space-y-2">
+        <div className="font-mono text-xs text-chalk/60 uppercase tracking-wider mb-1">Install on iPhone</div>
+        <ol className="text-sm text-chalk/80 space-y-1 list-decimal list-inside">
+          <li>Open this app in Safari</li>
+          <li>Tap the Share button (box with arrow up)</li>
+          <li>Tap "Add to Home Screen"</li>
+          <li>Name it and tap Add</li>
+        </ol>
+        <div className="text-xs text-chalk/50 mt-2">Works offline after first load (except drill videos).</div>
+      </div>
+
+      <button onClick={clearAll} className="w-full bg-courtlight border border-flame/30 text-flame/80 px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+        ⚠ Erase All Data
+      </button>
+
+      <div className="text-center text-xs text-chalk/40 font-mono pt-4">
+        Hooper's Path · built for JV dreams
+      </div>
+    </div>
+  );
+}
+
+// Mount
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+
+</body>
+</html>
