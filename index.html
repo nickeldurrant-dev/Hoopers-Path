@@ -285,6 +285,9 @@ setTimeout(function() {
 
 <script src="./drills-data.js"></script>
 <script src="./diagrams.js"></script>
+<script src="./firebase-config.js"></script>
+<script type="module" src="./auth.js"></script>
+<script type="module" src="./sync.js"></script>
 
 <script type="module">
 function showErr(stage, err) {
@@ -926,17 +929,72 @@ function EnvPicker({ defaultEnv, onPick, onCancel }) {
 }
 
 // PROFILE PICKER — shown when no active profile or when switching
+function SignInScreen({ error, onSignIn }) {
+  const [signing, setSigning] = useState(false);
+  const handle = async () => {
+    setSigning(true);
+    try { await onSignIn(); }
+    finally { setSigning(false); }
+  };
+  return html`
+    <div class="min-h-screen flex flex-col justify-center px-6 fade-in" style="background:radial-gradient(ellipse at top, rgba(255,107,26,0.12), transparent 60%), var(--court)">
+      <div class="container text-center space-y-6">
+        <div>
+          <div class="font-mono text-xs text-flame uppercase tracking-widest">Welcome to</div>
+          <h1 class="font-display text-6xl text-chalk leading-none mt-2">Hooper's Path</h1>
+          <div class="text-sm text-chalk-70 mt-3">Train like a pro. Track everything. Build the habit.</div>
+        </div>
+
+        <div class="bg-courtlight border rounded-2xl p-6 space-y-4 flame-border">
+          <div class="font-display text-2xl text-chalk leading-tight">Sign in to get started</div>
+          <div class="text-xs text-chalk-60 font-mono">Your stats sync across your devices</div>
+
+          <button onClick=${handle} disabled=${signing}
+            class="w-full font-display text-lg py-4 rounded-2xl flex items-center justify-center gap-2"
+            style="background:#000;color:#fff;border:1px solid #555">
+            ${signing ? 'Signing in…' : html`<span></span><span>Sign in with Apple</span>`}
+          </button>
+
+          ${error ? html`
+            <div class="bg-flame-10 border-flame-30 rounded-lg p-3 text-xs text-chalk" style="word-break:break-word">
+              ${error}
+            </div>
+          ` : null}
+        </div>
+
+        <div class="text-xs text-chalk-50 font-mono space-y-1">
+          <div>By signing in you confirm you're 13 or older.</div>
+          <div>Your workouts, PRs, and games sync to your Apple ID account.</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function ProfilePicker({ profiles, onPick, onAdd, onDelete, onCancel, allowCancel }) {
   const [adding, setAdding] = useState(profiles.length === 0);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#ff6b1a');
+  const [age, setAge] = useState('');
+  const [ageError, setAgeError] = useState(null);
   const colors = ['#ff6b1a','#b4ff3a','#3aa5ff','#e83aff','#ffd53a','#3affc1'];
 
   const submit = () => {
     const clean = name.trim();
     if (!clean) return;
+    const ageNum = parseInt(age, 10);
+    if (!ageNum || ageNum < 13) {
+      setAgeError('Hooper\'s Path is for ages 13 and up.');
+      return;
+    }
+    if (ageNum > 100) {
+      setAgeError('Hmm, that age doesn\'t look right.');
+      return;
+    }
+    setAgeError(null);
     onAdd(clean, color);
     setName('');
+    setAge('');
     setAdding(false);
   };
 
@@ -947,7 +1005,7 @@ function ProfilePicker({ profiles, onPick, onAdd, onDelete, onCancel, allowCance
           <div class="text-center">
             <div class="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
             <h2 class="font-display text-4xl text-chalk mt-1">New Player</h2>
-            <div class="text-sm text-chalk-70 mt-2">Let's set you up. Just need a name.</div>
+            <div class="text-sm text-chalk-70 mt-2">Let's set you up.</div>
           </div>
           <div class="bg-courtlight border rounded-2xl p-5 space-y-4">
             <div>
@@ -956,6 +1014,14 @@ function ProfilePicker({ profiles, onPick, onAdd, onDelete, onCancel, allowCance
                 placeholder="First name"
                 maxlength="20"
                 class="w-full bg-court border rounded-xl p-3 text-lg text-chalk" />
+            </div>
+            <div>
+              <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Age</div>
+              <input type="number" value=${age} onInput=${e => { setAge(e.target.value); setAgeError(null); }}
+                placeholder="Your age"
+                min="13" max="100"
+                class="w-full bg-court border rounded-xl p-3 text-lg text-chalk" />
+              ${ageError ? html`<div class="text-xs text-flame font-mono mt-1">${ageError}</div>` : null}
             </div>
             <div>
               <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Team Color</div>
@@ -1888,6 +1954,8 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
         </label>
       </div>
 
+      <${TeamSection} />
+
       <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
         <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-1">Install on iPhone</div>
         <ol class="text-sm text-chalk space-y-1" style="opacity:0.8">
@@ -1899,6 +1967,8 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
         <div class="text-xs text-chalk-50 mt-2">Works offline after first load.</div>
       </div>
 
+      <${AccountSection} />
+
       <button onClick=${clearMyData} class="w-full bg-courtlight px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider"
         style="border:1px solid rgba(255,107,26,0.3);color:rgba(255,107,26,0.8)">
         ⚠ Erase My Data
@@ -1908,8 +1978,238 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
   `;
 }
 
+function AccountSection() {
+  const [session, setSession] = useState(() => window.HOOPERS_AUTH ? window.HOOPERS_AUTH.getSession() : { user: null });
+  useEffect(() => {
+    if (!window.HOOPERS_AUTH) return;
+    return window.HOOPERS_AUTH.subscribe(s => setSession({ ...s }));
+  }, []);
+
+  const signOut = async () => {
+    if (!confirm('Sign out? Your stats will stay in the cloud and sync back in when you sign in again. Local data on this device will remain.')) return;
+    if (window.HOOPERS_AUTH) await window.HOOPERS_AUTH.signOut();
+    location.reload();
+  };
+
+  if (!session.user) return null;
+
+  return html`
+    <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
+      <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-1">Account</div>
+      <div class="text-sm text-chalk" style="opacity:0.9">
+        Signed in${session.user.email ? ' as ' + session.user.email : ''}
+      </div>
+      <div class="text-xs text-chalk-50">
+        Your stats sync to the cloud automatically.
+      </div>
+      <button onClick=${signOut} class="w-full bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider mt-2">
+        Sign Out
+      </button>
+    </div>
+  `;
+}
+
+function TeamSection() {
+  const [teams, setTeams] = useState(null);      // null = loading, [] = none
+  const [mode, setMode] = useState('view');      // view | join | create
+  const [code, setCode] = useState('');
+  const [teamName, setTeamName] = useState('');
+  const [playerName, setPlayerName] = useState('');
+  const [coachName, setCoachName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  useEffect(() => {
+    if (!window.HOOPERS_SYNC) return;
+    (async () => {
+      try {
+        const t = await window.HOOPERS_SYNC.getMyTeams();
+        setTeams(t);
+      } catch (e) {
+        setTeams([]);
+      }
+    })();
+  }, []);
+
+  const doJoin = async () => {
+    if (!code.trim() || !playerName.trim()) return;
+    setBusy(true); setMessage(null);
+    try {
+      const result = await window.HOOPERS_SYNC.joinTeamByCode(code, playerName);
+      setMessage({ ok: true, text: 'Request sent! Your coach needs to approve you before you appear on the team.' });
+      // Update settings.teamIds
+      const s = getSettings();
+      const teamIds = s.teamIds || [];
+      if (!teamIds.includes(result.teamId)) teamIds.push(result.teamId);
+      saveSettingsLS({ ...s, teamIds });
+      if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncSettings({ ...s, teamIds }).catch(()=>{});
+      setCode(''); setPlayerName('');
+      setTimeout(() => { setMode('view'); setMessage(null); window.location.reload(); }, 2000);
+    } catch (e) {
+      setMessage({ ok: false, text: e.message || 'Could not join team.' });
+    }
+    setBusy(false);
+  };
+
+  const doCreate = async () => {
+    if (!teamName.trim() || !coachName.trim()) return;
+    setBusy(true); setMessage(null);
+    try {
+      const result = await window.HOOPERS_SYNC.createTeam(teamName, coachName);
+      setMessage({ ok: true, text: 'Team created! Share this code with your players: ' + result.code });
+      const s = getSettings();
+      const teamIds = s.teamIds || [];
+      if (!teamIds.includes(result.teamId)) teamIds.push(result.teamId);
+      saveSettingsLS({ ...s, teamIds, role: 'coach' });
+      if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncSettings({ ...s, teamIds, role: 'coach' }).catch(()=>{});
+      setTeamName(''); setCoachName('');
+    } catch (e) {
+      setMessage({ ok: false, text: e.message || 'Could not create team.' });
+    }
+    setBusy(false);
+  };
+
+  return html`
+    <div class="bg-courtlight border rounded-2xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Team</div>
+      </div>
+
+      ${teams === null ? html`
+        <div class="text-xs text-chalk-50">Loading teams...</div>
+      ` : teams.length === 0 ? html`
+        <div class="text-sm text-chalk" style="opacity:0.8">Not on a team yet.</div>
+        <div class="text-xs text-chalk-50">Join with a code from your coach, or create a team if you're a coach.</div>
+      ` : html`
+        <div class="space-y-2">
+          ${teams.map(t => html`
+            <div key=${t.id} class="bg-court border rounded-xl p-3">
+              <div class="font-display text-lg text-chalk leading-tight">${t.name}</div>
+              <div class="text-xs text-chalk-60 font-mono">${t.code ? 'Code: ' + t.code : ''}</div>
+            </div>
+          `)}
+        </div>
+      `}
+
+      ${mode === 'view' ? html`
+        <div class="grid grid-cols-2 gap-2">
+          <button onClick=${() => { setMode('join'); setMessage(null); }} class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+            Join a Team
+          </button>
+          <button onClick=${() => { setMode('create'); setMessage(null); }} class="bg-flame text-courtlight px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+            I'm a Coach
+          </button>
+        </div>
+      ` : mode === 'join' ? html`
+        <div class="space-y-3 pt-2">
+          <div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Team Code</div>
+            <input type="text" value=${code} onInput=${e => setCode(e.target.value.toUpperCase())}
+              maxlength="6" placeholder="ABC123"
+              class="w-full bg-court border rounded-xl p-3 text-lg text-chalk font-mono tracking-widest" />
+          </div>
+          <div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Your Name (visible to teammates)</div>
+            <input type="text" value=${playerName} onInput=${e => setPlayerName(e.target.value)}
+              maxlength="20" placeholder="First name or nickname"
+              class="w-full bg-court border rounded-xl p-3 text-chalk" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button onClick=${() => setMode('view')} class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+              Cancel
+            </button>
+            <button onClick=${doJoin} disabled=${busy || !code.trim() || !playerName.trim()} class="bg-flame text-courtlight px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+              ${busy ? 'Joining…' : 'Join'}
+            </button>
+          </div>
+        </div>
+      ` : html`
+        <div class="space-y-3 pt-2">
+          <div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Team Name</div>
+            <input type="text" value=${teamName} onInput=${e => setTeamName(e.target.value)}
+              maxlength="40" placeholder="e.g. Eagles JV"
+              class="w-full bg-court border rounded-xl p-3 text-chalk" />
+          </div>
+          <div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Your Name (shown as coach)</div>
+            <input type="text" value=${coachName} onInput=${e => setCoachName(e.target.value)}
+              maxlength="20" placeholder="Coach first name or Coach LastName"
+              class="w-full bg-court border rounded-xl p-3 text-chalk" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button onClick=${() => setMode('view')} class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+              Cancel
+            </button>
+            <button onClick=${doCreate} disabled=${busy || !teamName.trim() || !coachName.trim()} class="bg-flame text-courtlight px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+              ${busy ? 'Creating…' : 'Create Team'}
+            </button>
+          </div>
+        </div>
+      `}
+
+      ${message ? html`
+        <div class="rounded-lg p-3 text-xs"
+          style=${'background:' + (message.ok ? 'rgba(180,255,58,0.1)' : 'rgba(255,107,26,0.1)') +
+            ';border:1px solid ' + (message.ok ? 'rgba(180,255,58,0.3)' : 'rgba(255,107,26,0.3)') +
+            ';color:' + (message.ok ? 'var(--lime)' : 'var(--flame)') + ';word-break:break-word'}>
+          ${message.text}
+        </div>
+      ` : null}
+    </div>
+  `;
+}
+
 // MAIN APP
 function App() {
+  // Auth state
+  const [authSession, setAuthSession] = useState(() => {
+    return window.HOOPERS_AUTH ? window.HOOPERS_AUTH.getSession() : { user: null, loading: true };
+  });
+  const [signInError, setSignInError] = useState(null);
+
+  // Subscribe to auth changes
+  useEffect(() => {
+    const waitForAuth = () => {
+      if (window.HOOPERS_AUTH) {
+        const unsub = window.HOOPERS_AUTH.subscribe(s => setAuthSession({ ...s }));
+        return unsub;
+      }
+      // auth.js hasn't loaded yet — listen for ready event
+      const onReady = () => {
+        const unsub = window.HOOPERS_AUTH.subscribe(s => setAuthSession({ ...s }));
+        document.removeEventListener('hoopers-auth-ready', onReady);
+        // Store unsub somewhere so effect cleanup works — but since this is inside effect,
+        // we just return it from the effect.
+      };
+      document.addEventListener('hoopers-auth-ready', onReady);
+      return () => document.removeEventListener('hoopers-auth-ready', onReady);
+    };
+    return waitForAuth();
+  }, []);
+
+  // When signed in but no local profile, try to restore from cloud
+  useEffect(() => {
+    if (!authSession.user || activeId || !window.HOOPERS_SYNC) return;
+    // Only if we have no local profiles at all
+    const existing = listProfiles();
+    if (existing.length > 0) return;
+    (async () => {
+      try {
+        const cloudProfile = await window.HOOPERS_SYNC.fetchCloudProfile();
+        if (cloudProfile && cloudProfile.name) {
+          const p = createProfile(cloudProfile.name, cloudProfile.color || '#ff6b1a');
+          setProfiles(listProfiles());
+          setActiveProfileId(p.id);
+          setActiveId(p.id);
+        }
+        // If no cloud profile either, fall through to normal profile picker
+      } catch (e) {
+        console.warn('Cloud profile restore failed:', e);
+      }
+    })();
+  }, [authSession.user, activeId]);
+
   // Profile state — null means "picker visible"
   const [profiles, setProfiles] = useState(() => listProfiles());
   const [activeId, setActiveId] = useState(() => {
@@ -1927,6 +2227,77 @@ function App() {
   const [settings, setSettingsState] = useState({});
   const [newBadge, setNewBadge] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hydrating, setHydrating] = useState(false);
+
+  // When signed-in user becomes available AND there's a local profile, hydrate from cloud
+  useEffect(() => {
+    if (!authSession.user || !activeId || !window.HOOPERS_SYNC) return;
+    setHydrating(true);
+    (async () => {
+      try {
+        const result = await window.HOOPERS_SYNC.hydrateFromCloud();
+        if (result.ok && result.data) {
+          const d = result.data;
+          // Cloud is source of truth: merge cloud data into local storage
+          // Only if cloud has something — empty cloud means first sign-in, so we push local UP
+          const hasCloudData = (d.workouts && d.workouts.length) ||
+            (d.games && d.games.length) ||
+            (d.prs && Object.keys(d.prs).length) ||
+            (d.badges && Object.keys(d.badges).length);
+          if (hasCloudData) {
+            // Write cloud data into local storage (merge, cloud wins)
+            if (d.prs) { savePRsLS(d.prs); setPRsState(d.prs); }
+            if (d.badges) { saveBadgesLS(d.badges); setBadgesState(d.badges); }
+            if (d.settings) { saveSettingsLS(d.settings); setSettingsState(d.settings); }
+            // Write workouts/checkins/games into IDB
+            const pid = getActiveProfileId();
+            const db = await openDB();
+            if (d.workouts.length) {
+              await Promise.all(d.workouts.map(w => new Promise((res, rej) => {
+                const tx = db.transaction('workouts', 'readwrite');
+                const payload = { ...w, key: pid + '::' + w.date, profile: pid };
+                const req = tx.objectStore('workouts').put(payload);
+                req.onsuccess = () => res();
+                req.onerror = () => rej(req.error);
+              })));
+            }
+            if (d.checkins.length) {
+              await Promise.all(d.checkins.map(c => new Promise((res, rej) => {
+                const tx = db.transaction('checkins', 'readwrite');
+                const payload = { ...c, key: pid + '::' + c.date, profile: pid };
+                const req = tx.objectStore('checkins').put(payload);
+                req.onsuccess = () => res();
+                req.onerror = () => rej(req.error);
+              })));
+            }
+            if (d.games.length) {
+              await Promise.all(d.games.map(g => new Promise((res, rej) => {
+                const tx = db.transaction('games', 'readwrite');
+                const { id, ...rest } = g;
+                const payload = { ...rest, profile: pid };
+                const req = tx.objectStore('games').add(payload);
+                req.onsuccess = () => res();
+                req.onerror = () => rej(req.error);
+              })));
+            }
+            // Reload local state
+            const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
+            setWorkouts(w); setGames(g); setCheckins(c);
+          } else {
+            // Empty cloud — first time signing in. Push local up.
+            const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
+            await window.HOOPERS_SYNC.pushLocalToCloud({
+              prs: getPRs(), badges: getUnlockedBadges(), settings: getSettings(),
+              workouts: w, games: g, checkins: c,
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Hydrate flow error:', e);
+      }
+      setHydrating(false);
+    })();
+  }, [authSession.user, activeId]);
 
   // Load all profile-scoped state whenever active profile changes
   useEffect(() => {
@@ -1974,15 +2345,36 @@ function App() {
       newly.forEach(b => { updated[b.id] = { unlockedAt: todayStr() }; });
       setBadgesState(updated);
       saveBadgesLS(updated);
+      if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncBadges(updated).catch(()=>{});
       setNewBadge(newly[0]);
     }
   }, [stats, activeId]);
 
-  const saveWorkout = async (w) => { await idbPut('workouts', w); setWorkouts(await idbGetAll('workouts')); };
-  const saveGame = async (g) => { await idbAdd('games', g); setGames(await idbGetAll('games')); };
-  const saveCheckin = async (c) => { await idbPut('checkins', c); setCheckins(await idbGetAll('checkins')); };
-  const savePRs = (next) => { setPRsState(next); savePRsLS(next); };
-  const onSaveSettings = (s) => { setSettingsState(s); saveSettingsLS(s); };
+  const saveWorkout = async (w) => {
+    await idbPut('workouts', w);
+    setWorkouts(await idbGetAll('workouts'));
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncWorkout(w).catch(()=>{});
+  };
+  const saveGame = async (g) => {
+    await idbAdd('games', g);
+    setGames(await idbGetAll('games'));
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncGame(g).catch(()=>{});
+  };
+  const saveCheckin = async (c) => {
+    await idbPut('checkins', c);
+    setCheckins(await idbGetAll('checkins'));
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncCheckin(c).catch(()=>{});
+  };
+  const savePRs = (next) => {
+    setPRsState(next);
+    savePRsLS(next);
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncPRs(next).catch(()=>{});
+  };
+  const onSaveSettings = (s) => {
+    setSettingsState(s);
+    saveSettingsLS(s);
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncSettings(s).catch(()=>{});
+  };
 
   // Profile actions
   const onPickProfile = (id) => {
@@ -1995,6 +2387,8 @@ function App() {
     const p = createProfile(name, color);
     setProfiles(listProfiles());
     onPickProfile(p.id);
+    // Sync profile to cloud so it shows up on other devices
+    if (window.HOOPERS_SYNC) window.HOOPERS_SYNC.syncProfile(p).catch(()=>{});
   };
   const onDeleteProfile = (id) => {
     deleteProfile(id);
@@ -2011,6 +2405,42 @@ function App() {
       setShowProfileSwitch(true);
     }
   };
+
+  // While auth SDK is still loading, show loading screen
+  if (authSession.loading) {
+    return html`
+      <div class="min-h-screen flex items-center justify-center">
+        <div class="font-display text-flame text-5xl">LOADING</div>
+      </div>
+    `;
+  }
+
+  // If not signed in, show sign-in screen
+  if (!authSession.user) {
+    return html`<${SignInScreen}
+      error=${signInError}
+      onSignIn=${async () => {
+        setSignInError(null);
+        if (!window.HOOPERS_AUTH) { setSignInError('Auth not loaded yet — refresh the page'); return; }
+        const result = await window.HOOPERS_AUTH.signInWithApple();
+        if (result.error) {
+          setSignInError(result.error.message || String(result.error));
+        }
+        // If pending (redirect), the page will navigate away and back
+      }} />`;
+  }
+
+  // If showing hydration loading
+  if (hydrating) {
+    return html`
+      <div class="min-h-screen flex items-center justify-center">
+        <div class="text-center">
+          <div class="font-display text-flame text-5xl">SYNCING</div>
+          <div class="font-mono text-xs text-chalk-60 mt-2">Loading your stats from the cloud...</div>
+        </div>
+      </div>
+    `;
+  }
 
   // If no active profile, show picker
   if (!activeId || showProfileSwitch) {

@@ -1,0 +1,119 @@
+rules_version = '2';
+
+// Hooper's Path — Firestore Security Rules
+// Data model:
+//   users/{uid}/profile          — user's display info (name, color)
+//   users/{uid}/workouts/{date}  — training day record
+//   users/{uid}/checkins/{date}  — morning check-in
+//   users/{uid}/games/{gameId}   — game log
+//   users/{uid}/prs/current      — personal records
+//   users/{uid}/badges/current   — unlocked badges
+//   users/{uid}/settings/current — user settings incl. teamId, role
+//   teams/{teamId}               — team metadata (name, code, coachUid, seasonStart, archived)
+//   teams/{teamId}/members/{uid} — per-member team record (role, joinedAt, approved)
+//   teamCodes/{code}             — lookup from invite code to teamId (public read for lookups)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is the request from the user whose data this is?
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: is this user a coach of the given team?
+    function isCoach(teamId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/teams/$(teamId)) &&
+        get(/databases/$(database)/documents/teams/$(teamId)).data.coachUid == request.auth.uid;
+    }
+
+    // Helper: is this user an approved member of the given team?
+    function isTeamMember(teamId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)).data.approved == true;
+    }
+
+    // ============================================================
+    // USERS — private to the owner
+    // ============================================================
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /profile/{docId} {
+        // Owner has full access. Team members can read basic profile info for team views.
+        // Coaches of the user's team can read full data.
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid);
+      }
+
+      match /workouts/{date} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /checkins/{date} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /games/{gameId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /prs/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /badges/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ============================================================
+    // TEAMS
+    // ============================================================
+    match /teams/{teamId} {
+      // Members and coach can read team metadata
+      allow read: if isTeamMember(teamId) || isCoach(teamId);
+      // Only coach can update/delete team metadata
+      allow update, delete: if isCoach(teamId);
+      // Any authenticated user can create a team (becoming its coach)
+      allow create: if isSignedIn() &&
+        request.resource.data.coachUid == request.auth.uid;
+
+      match /members/{memberUid} {
+        // Members can read the roster; coach can too
+        allow read: if isTeamMember(teamId) || isCoach(teamId);
+        // A user can create their own member record (join request) but must be unapproved
+        allow create: if isSignedIn() &&
+          memberUid == request.auth.uid &&
+          request.resource.data.approved == false;
+        // Users can delete their own membership (leave team)
+        // Coach can approve/remove anyone
+        allow update, delete: if isCoach(teamId) || (isOwner(memberUid) && !(resource.data.approved == true && resource.data.role == 'coach'));
+      }
+    }
+
+    // ============================================================
+    // TEAM CODES — public lookups from code to teamId
+    // Read is public (anyone can check if a code exists, to join)
+    // Write is restricted — codes are created server-side (via client, by coach only)
+    // ============================================================
+    match /teamCodes/{code} {
+      allow read: if isSignedIn();
+      // Coach creates the code when creating the team
+      allow create: if isSignedIn() &&
+        request.resource.data.coachUid == request.auth.uid;
+      allow delete: if isSignedIn() &&
+        resource.data.coachUid == request.auth.uid;
+    }
+  }
+}
