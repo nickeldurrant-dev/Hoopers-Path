@@ -20,11 +20,33 @@ import {
   initializeFirestore,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-if (!window.FIREBASE_CONFIG) {
-  console.error('FIREBASE_CONFIG not loaded — auth will not work');
+// DEBUG: Log every auth event visibly to a debug overlay so we can diagnose silent failures
+function debugLog(msg) {
+  console.log('[AUTH]', msg);
+  let el = document.getElementById('debug-display');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'debug-display';
+    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(0,255,0,0.85);color:#000;padding:8px;font:11px monospace;z-index:99999;max-height:40vh;overflow:auto;white-space:pre-wrap;border-top:2px solid #000';
+    document.body.appendChild(el);
+    el.onclick = () => { el.style.display = 'none'; };
+  }
+  el.textContent = (el.textContent || '') + new Date().toISOString().slice(11,19) + ' ' + msg + '\n';
+  el.scrollTop = el.scrollHeight;
 }
 
+debugLog('auth.js loaded');
+debugLog('URL: ' + location.href);
+debugLog('UA: ' + navigator.userAgent.slice(0, 80));
+
+if (!window.FIREBASE_CONFIG) {
+  debugLog('FATAL: FIREBASE_CONFIG missing');
+  throw new Error('Firebase config not loaded');
+}
+debugLog('Config OK projectId=' + window.FIREBASE_CONFIG.projectId);
+
 const app = initializeApp(window.FIREBASE_CONFIG);
+debugLog('Firebase app initialized');
 
 // Firestore with long polling auto-detect (more reliable on iOS Safari + PWA + corp networks)
 let db;
@@ -42,13 +64,14 @@ const auth = getAuth(app);
 (async () => {
   try {
     await setPersistence(auth, indexedDBLocalPersistence);
-    console.log('Auth persistence: IndexedDB');
+    debugLog('Persistence: IndexedDB OK');
   } catch (e1) {
+    debugLog('IDB persistence failed: ' + (e1.code || e1.message));
     try {
       await setPersistence(auth, browserLocalPersistence);
-      console.log('Auth persistence: localStorage (fallback)');
+      debugLog('Persistence: localStorage OK (fallback)');
     } catch (e2) {
-      console.warn('Could not set auth persistence:', e2);
+      debugLog('All persistence failed: ' + (e2.code || e2.message));
     }
   }
 })();
@@ -73,11 +96,17 @@ function notify() {
 }
 
 // Handle redirect result (if we came back from an Apple auth redirect)
+debugLog('Checking for redirect result...');
 getRedirectResult(auth).then(result => {
   if (result && result.user) {
-    console.log('Signed in via redirect as', result.user.uid);
+    debugLog('Redirect SUCCESS uid=' + result.user.uid.slice(0, 8));
+  } else if (result === null) {
+    debugLog('Redirect result null (no pending sign-in)');
+  } else {
+    debugLog('Redirect result: ' + JSON.stringify(result).slice(0, 200));
   }
 }).catch(err => {
+  debugLog('REDIRECT ERROR: ' + (err.code || '') + ' - ' + (err.message || String(err)).slice(0, 200));
   console.error('Redirect result error:', err);
   session.error = err.message || String(err);
   notify();
@@ -93,6 +122,7 @@ getRedirectResult(auth).then(result => {
 
 // Watch for auth state changes
 onAuthStateChanged(auth, (user) => {
+  debugLog('Auth state: ' + (user ? 'signed in uid=' + user.uid.slice(0,8) : 'signed out'));
   session.user = user;
   session.loading = false;
   session.error = null;
@@ -106,15 +136,21 @@ async function signInWithApple() {
     // Detect iOS: UA includes "iPhone" or "iPad", or Mac with touch (iPad)
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1);
+    debugLog('signInWithApple called, isIOS=' + isIOS);
     if (isIOS) {
+      debugLog('Calling signInWithRedirect...');
       await signInWithRedirect(auth, appleProvider);
+      debugLog('Redirect issued (you should be navigating to Apple now)');
       // Page will navigate away; getRedirectResult handles return
       return { pending: true };
     } else {
+      debugLog('Calling signInWithPopup...');
       const result = await signInWithPopup(auth, appleProvider);
+      debugLog('Popup SUCCESS uid=' + result.user.uid.slice(0,8));
       return { user: result.user };
     }
   } catch (err) {
+    debugLog('signIn ERROR: ' + (err.code || '') + ' - ' + (err.message || String(err)).slice(0, 200));
     console.error('Apple sign in error:', err);
     session.error = err.message || String(err);
     notify();
