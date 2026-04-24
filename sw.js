@@ -1,5 +1,5 @@
 // Hooper's Path service worker - offline-first caching
-const CACHE_NAME = 'hoopers-path-v3';
+const CACHE_NAME = 'hoopers-path-v4';
 const ASSETS = [
   './',
   './index.html',

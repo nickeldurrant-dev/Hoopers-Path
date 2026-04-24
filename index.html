@@ -627,7 +627,7 @@ function TabBar({ tab, setTab }) {
     { id: 'today', label: 'Today', icon: '🏀' },
     { id: 'drills', label: 'Drills', icon: '📋' },
     { id: 'progress', label: 'Stats', icon: '📊' },
-    { id: 'team', label: 'Team', icon: '👥' },
+    { id: 'badges', label: 'Trophy', icon: '🏆' },
     { id: 'settings', label: 'More', icon: '⚙️' },
   ];
   return html`
@@ -1600,163 +1600,6 @@ function ProgressTab({ workouts, games, prs, stats, badges }) {
   `;
 }
 
-// TEAM TAB — leaderboard across all profiles on this device
-function TeamTab({ profiles, activeProfileId }) {
-  const [board, setBoard] = useState(null);
-  const [weeklyChallenge, setWeeklyChallenge] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      // Gather stats per profile
-      const allWorkouts = await idbGetAllAcrossProfiles('workouts');
-      const allGames = await idbGetAllAcrossProfiles('games');
-      const allCheckins = await idbGetAllAcrossProfiles('checkins');
-
-      const rows = profiles.map(p => {
-        // Load PRs from localStorage for each profile
-        const prs = (() => {
-          try { return JSON.parse(localStorage.getItem('hp_' + p.id + '_prs') || '{}'); }
-          catch(e) { return {}; }
-        })();
-        const badges = (() => {
-          try { return JSON.parse(localStorage.getItem('hp_' + p.id + '_badges') || '{}'); }
-          catch(e) { return {}; }
-        })();
-        const myWorkouts = allWorkouts.filter(w => w.profile === p.id);
-        const myGames = allGames.filter(g => g.profile === p.id);
-        const myCheckins = allCheckins.filter(c => c.profile === p.id);
-        const completedWorkouts = myWorkouts.filter(w => w.completed);
-        // Weekly challenge: FTs made in the last 7 days
-        const sevenAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return dateStr(d); })();
-        const weeklyFT = completedWorkouts
-          .filter(w => w.date >= sevenAgo)
-          .reduce((a, w) => a + (w.ftMade || 0), 0);
-        return {
-          profile: p,
-          streak: computeStreak(myWorkouts, myCheckins),
-          totalWorkouts: completedWorkouts.length,
-          totalGames: myGames.length,
-          ftMade: completedWorkouts.reduce((a, w) => a + (w.ftMade || 0), 0),
-          weeklyFT,
-          pushups: prs.maxPushups || 0,
-          pullups: prs.maxPullups || 0,
-          vertical: prs.vertical || 0,
-          badges: Object.keys(badges).length,
-        };
-      });
-
-      setBoard(rows);
-
-      // Weekly challenge pick a winner
-      const topWeekly = [...rows].sort((a, b) => b.weeklyFT - a.weeklyFT)[0];
-      setWeeklyChallenge({
-        title: 'FREE THROW KINGS',
-        subtitle: 'Most FTs made this week',
-        leader: topWeekly && topWeekly.weeklyFT > 0 ? topWeekly : null
-      });
-    })();
-  }, [profiles, activeProfileId]);
-
-  if (!board) {
-    return html`<div class="fade-in"><div class="font-display text-chalk-50 text-center py-8">Loading team…</div></div>`;
-  }
-
-  const leaders = (key, higherBetter = true) => {
-    const sorted = [...board].sort((a, b) => higherBetter ? b[key] - a[key] : a[key] - b[key]);
-    return sorted.filter(r => r[key] > 0);
-  };
-
-  // Helper to render a single leaderboard list
-  const makeList = (title, emoji, pickFn, unit) => {
-    const data = board
-      .map(r => ({ ...r, val: pickFn(r) }))
-      .filter(r => r.val > 0)
-      .sort((a, b) => b.val - a.val);
-    if (data.length === 0) return null;
-    return html`
-      <div class="bg-courtlight border rounded-2xl p-4">
-        <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">${emoji} ${title}</div>
-        <div class="space-y-2">
-          ${data.slice(0, 5).map((r, i) => {
-            const medal = ['🥇','🥈','🥉'][i] || (i + 1 + '.');
-            const isYou = r.profile.id === activeProfileId;
-            return html`
-              <div key=${r.profile.id} class="flex items-center gap-3 p-2 rounded-lg"
-                style=${'background:' + (isYou ? 'rgba(255,107,26,0.12)' : 'var(--court)')}>
-                <div class="font-display text-lg w-8 text-center">${medal}</div>
-                <div class="w-9 h-9 rounded-full flex items-center justify-center font-display text-base shrink-0"
-                  style=${'background:' + r.profile.color + ';color:var(--courtlight)'}>
-                  ${r.profile.name[0].toUpperCase()}
-                </div>
-                <div class="flex-1" style="min-width:0">
-                  <div class="font-display text-lg text-chalk leading-tight">${r.profile.name}${isYou ? ' (you)' : ''}</div>
-                </div>
-                <div class="text-right">
-                  <div class="font-display font-mono text-xl text-flame">${r.val}</div>
-                  ${unit ? html`<div class="font-mono text-10 text-chalk-50">${unit}</div>` : null}
-                </div>
-              </div>
-            `;
-          })}
-        </div>
-      </div>
-    `;
-  };
-
-  return html`
-    <div class="space-y-4 fade-in">
-      <div>
-        <div class="font-mono text-xs text-flame uppercase tracking-widest">Team</div>
-        <h2 class="font-display text-3xl text-chalk">${profiles.length} ${profiles.length === 1 ? 'Player' : 'Players'}</h2>
-      </div>
-
-      ${weeklyChallenge && weeklyChallenge.leader ? html`
-        <div class="bg-flame-grad text-chalk rounded-2xl p-5 stripe-bg flame-border">
-          <div class="font-mono text-xs uppercase tracking-widest opacity-80">🏆 Weekly Challenge</div>
-          <div class="font-display text-2xl mt-1">${weeklyChallenge.title}</div>
-          <div class="text-sm opacity-90 mt-1">${weeklyChallenge.subtitle}</div>
-          <div class="flex items-center gap-3 mt-4 bg-courtlight rounded-xl p-3">
-            <div class="text-2xl">🥇</div>
-            <div class="w-10 h-10 rounded-full flex items-center justify-center font-display shrink-0"
-              style=${'background:' + weeklyChallenge.leader.profile.color + ';color:var(--courtlight)'}>
-              ${weeklyChallenge.leader.profile.name[0].toUpperCase()}
-            </div>
-            <div class="flex-1">
-              <div class="font-display text-xl text-chalk">${weeklyChallenge.leader.profile.name}</div>
-              <div class="text-xs text-chalk-70">Leads with ${weeklyChallenge.leader.weeklyFT} FTs made</div>
-            </div>
-          </div>
-        </div>
-      ` : profiles.length > 1 ? html`
-        <div class="bg-courtlight border rounded-2xl p-4 text-center">
-          <div class="text-3xl mb-2">🏆</div>
-          <div class="font-display text-lg text-chalk">Weekly Challenge: Free Throw Kings</div>
-          <div class="text-xs text-chalk-60 mt-1">Make free throws this week to lead the board.</div>
-        </div>
-      ` : null}
-
-      ${makeList('Active Streak', '🔥', r => r.streak, 'days')}
-      ${makeList('Workouts Total', '💪', r => r.totalWorkouts)}
-      ${makeList('Free Throws Made', '🎯', r => r.ftMade)}
-      ${makeList('Max Push-ups', '💪', r => r.pushups, 'reps')}
-      ${makeList('Max Pull-ups', '💪', r => r.pullups, 'reps')}
-      ${makeList('Vertical Jump', '🚀', r => r.vertical, 'in')}
-      ${makeList('Games Played', '🏀', r => r.totalGames)}
-      ${makeList('Badges Earned', '🏆', r => r.badges)}
-
-      ${profiles.length === 1 ? html`
-        <div class="bg-courtlight border rounded-2xl p-5 text-center">
-          <div class="text-4xl mb-2">👥</div>
-          <div class="font-display text-xl text-chalk">Bring Your Teammates</div>
-          <div class="text-sm text-chalk-60 mt-2">Add players in <span class="text-flame">More → Players</span> to compete on the leaderboard.</div>
-          <div class="text-xs text-chalk-40 mt-3">Each player's data stays private on their own phone. This device shows everyone who's been added here.</div>
-        </div>
-      ` : null}
-
-      <div class="text-center text-xs text-chalk-40 font-mono pt-2">Rankings update as each player trains.</div>
-    </div>
-  `;
-}
 
 // BADGES TAB (now reachable via settings)
 function BadgesTab({ unlocked }) {
@@ -1809,11 +1652,13 @@ function BadgeUnlock({ badge, onClose }) {
 // SETTINGS TAB
 function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onSwitchProfile, onAddProfile, onDeleteProfile, onViewBadges }) {
   const [saved, setSaved] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const exportData = async () => {
     const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
     const data = {
       exportedAt: new Date().toISOString(),
+      version: 2,
       profile: profile,
       settings: getSettings(), prs: getPRs(), badges: getUnlockedBadges(),
       workouts: w, games: g, checkins: c
@@ -1825,6 +1670,95 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
     a.download = 'hoopers-path-' + (profile ? profile.name.toLowerCase().replace(/\s+/g,'-') + '-' : '') + todayStr() + '.json';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const importData = async (file) => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object') throw new Error('Invalid backup file');
+      if (!Array.isArray(data.workouts) || !Array.isArray(data.games) || !Array.isArray(data.checkins)) {
+        throw new Error('Backup file missing expected data');
+      }
+      // Confirm with the user before overwriting
+      const workoutCount = data.workouts.length;
+      const gameCount = data.games.length;
+      const backupName = data.profile && data.profile.name ? data.profile.name : 'unknown player';
+      const msg = 'Import backup for ' + backupName + '?\n\n' +
+        '• ' + workoutCount + ' workouts\n' +
+        '• ' + gameCount + ' games\n' +
+        '• Exported ' + (data.exportedAt ? new Date(data.exportedAt).toLocaleDateString() : 'unknown date') + '\n\n' +
+        'This will ADD to the current player (' + (profile ? profile.name : 'default') + '). Duplicates will be replaced, not merged.';
+      if (!confirm(msg)) { setImporting(false); return; }
+
+      // Import localStorage data (PRs, badges, settings) - merge
+      if (data.prs) {
+        const currentPRs = getPRs();
+        const mergedPRs = { ...currentPRs };
+        Object.entries(data.prs).forEach(([k, v]) => {
+          if (typeof v !== 'number') return;
+          const lowerBetter = (k === 'mileTime' || k === 'suicideTime');
+          const cur = mergedPRs[k];
+          if (cur == null || (lowerBetter ? v < cur : v > cur)) mergedPRs[k] = v;
+        });
+        savePRsLS(mergedPRs);
+      }
+      if (data.badges) {
+        const currentBadges = getUnlockedBadges();
+        saveBadgesLS({ ...currentBadges, ...data.badges });
+      }
+      if (data.settings) {
+        const currentSettings = getSettings();
+        saveSettingsLS({ ...currentSettings, ...data.settings });
+      }
+
+      // Import IndexedDB data - workouts & checkins keyed by date (profile-scoped), games autoincrement
+      const db = await openDB();
+      const pid = getActiveProfileId();
+      for (const w of data.workouts) {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('workouts', 'readwrite');
+          const payload = { ...w, key: pid + '::' + w.date, profile: pid };
+          const req = tx.objectStore('workouts').put(payload);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      }
+      for (const c of data.checkins) {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('checkins', 'readwrite');
+          const payload = { ...c, key: pid + '::' + c.date, profile: pid };
+          const req = tx.objectStore('checkins').put(payload);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      }
+      for (const g of data.games) {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('games', 'readwrite');
+          // Strip old id so it autoincrements fresh for this profile
+          const { id, ...rest } = g;
+          const payload = { ...rest, profile: pid };
+          const req = tx.objectStore('games').add(payload);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      alert('Backup imported successfully! Reloading the app.');
+      location.reload();
+    } catch (e) {
+      alert('Could not import backup: ' + e.message);
+      console.error('Import error:', e);
+    }
+    setImporting(false);
+  };
+
+  const onFileChosen = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importData(file);
+    e.target.value = ''; // reset for next time
   };
 
   const shareStats = async () => {
@@ -1933,18 +1867,25 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
         </button>
       </div>
 
-      <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
-        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Your Data</div>
+      <div class="bg-courtlight border rounded-2xl p-4 space-y-3">
+        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Your Data</div>
         <div class="text-sm text-chalk" style="opacity:0.8">${workouts.length} workouts · ${games.length} games logged</div>
-        <div class="text-xs text-chalk-50">Everything stays on your phone.</div>
-        <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="text-xs text-chalk-50">Everything stays on your phone. Export a backup monthly so you don't lose progress if you change phones or reinstall.</div>
+        <div class="grid grid-cols-2 gap-2">
           <button onClick=${shareStats} class="bg-flame text-courtlight px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
             📤 Share Stats
           </button>
           <button onClick=${exportData} class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
-            📥 Backup (JSON)
+            📥 Backup
           </button>
         </div>
+        <label class="block">
+          <input type="file" accept="application/json,.json" onChange=${onFileChosen} style="display:none" />
+          <div class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider text-center"
+            style=${'cursor:pointer;opacity:' + (importing ? '0.5' : '1') + ';border-color:rgba(180,255,58,0.3);color:var(--lime)'}>
+            ${importing ? '⌛ Importing…' : '📂 Restore from Backup'}
+          </div>
+        </label>
       </div>
 
       <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
@@ -2103,7 +2044,7 @@ function App() {
             saveWorkout=${saveWorkout} saveCheckin=${saveCheckin} savePRs=${savePRs} saveGame=${saveGame} />` : null}
           ${tab === 'drills' ? html`<${DrillsTab} />` : null}
           ${tab === 'progress' ? html`<${ProgressTab} workouts=${workouts} games=${games} prs=${prs} stats=${stats} badges=${badges} />` : null}
-          ${tab === 'team' ? html`<${TeamTab} profiles=${profiles} activeProfileId=${activeId} />` : null}
+          ${tab === 'badges' ? html`<${BadgesTab} unlocked=${badges} /> ` : null}
           ${tab === 'settings' ? html`<${SettingsTab} settings=${settings} onSave=${onSaveSettings} workouts=${workouts} games=${games}
             profile=${current} profiles=${profiles}
             onSwitchProfile=${onSwitchProfile}
