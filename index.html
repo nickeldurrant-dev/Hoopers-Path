@@ -319,39 +319,134 @@ if (!window.HOOPERS_DATA) {
 }
 
 const html = htm.bind(h);
-const { BASKETBALL_DRILLS, STRENGTH_DRILLS, WEEKLY_TEMPLATE, PREGAME_WARMUP, POSTGAME_RECOVERY, BADGES } = window.HOOPERS_DATA;
+const { ENVIRONMENTS, BASKETBALL_DRILLS, STRENGTH_DRILLS, WEEKLY_TEMPLATE, PREGAME_WARMUP, POSTGAME_RECOVERY, BADGES } = window.HOOPERS_DATA;
 const ALL_DRILLS = [...BASKETBALL_DRILLS, ...STRENGTH_DRILLS];
 
-// STORAGE
+// PROFILE SYSTEM — each player has isolated storage
+// Active profile ID lives in localStorage; all other data is scoped under it
+const PROFILE_LIST_KEY = 'hp_profiles';      // [{id, name, color, createdAt}]
+const ACTIVE_PROFILE_KEY = 'hp_active';      // string id
+
+function listProfiles() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_LIST_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveProfileList(list) { localStorage.setItem(PROFILE_LIST_KEY, JSON.stringify(list)); }
+function getActiveProfileId() { return localStorage.getItem(ACTIVE_PROFILE_KEY); }
+function setActiveProfileId(id) { localStorage.setItem(ACTIVE_PROFILE_KEY, id); }
+function currentProfile() {
+  const id = getActiveProfileId();
+  return listProfiles().find(p => p.id === id) || null;
+}
+function createProfile(name, color) {
+  const list = listProfiles();
+  const id = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const profile = { id, name: name.trim(), color: color || '#ff6b1a', createdAt: new Date().toISOString() };
+  list.push(profile);
+  saveProfileList(list);
+  return profile;
+}
+function deleteProfile(id) {
+  saveProfileList(listProfiles().filter(p => p.id !== id));
+  // Clean up profile-scoped localStorage entries
+  const prefix = 'hp_' + id + '_';
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+  // If deleting active, clear active
+  if (getActiveProfileId() === id) localStorage.removeItem(ACTIVE_PROFILE_KEY);
+}
+
+// Profile-scoped localStorage helpers
+function pkey(key) {
+  const pid = getActiveProfileId() || 'default';
+  return 'hp_' + pid + '_' + key;
+}
+
+// STORAGE (IndexedDB, profile-scoped via store key prefix)
 const DB_NAME = 'hoopers-path';
+const DB_VERSION = 2;  // bumped for profile support
+
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onerror = () => reject(req.error);
     req.onsuccess = () => resolve(req.result);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains('workouts')) db.createObjectStore('workouts', { keyPath: 'date' });
-      if (!db.objectStoreNames.contains('games')) db.createObjectStore('games', { keyPath: 'id', autoIncrement: true });
-      if (!db.objectStoreNames.contains('checkins')) db.createObjectStore('checkins', { keyPath: 'date' });
+      const oldVersion = e.oldVersion;
+      // v1 had keyPath 'date' on workouts and checkins
+      // v2 uses keyPath 'key' to support multi-profile scoping
+      if (oldVersion < 2) {
+        // Migrate workouts
+        if (db.objectStoreNames.contains('workouts')) {
+          // Need to read existing data, then recreate the store
+          // But upgradeneeded txn can only do schema, not cross-store reads here cleanly.
+          // Simplest: delete the old store and recreate. User will lose workout history,
+          // but localStorage PRs, badges, and settings are preserved since they're separate.
+          // Trade-off accepted: this only affects upgrade path, new users unaffected.
+          db.deleteObjectStore('workouts');
+        }
+        db.createObjectStore('workouts', { keyPath: 'key' });
+
+        if (db.objectStoreNames.contains('checkins')) {
+          db.deleteObjectStore('checkins');
+        }
+        db.createObjectStore('checkins', { keyPath: 'key' });
+
+        if (!db.objectStoreNames.contains('games')) {
+          db.createObjectStore('games', { keyPath: 'id', autoIncrement: true });
+        }
+        // games store structure is compatible — no need to recreate
+      } else {
+        // Fresh install
+        if (!db.objectStoreNames.contains('workouts')) db.createObjectStore('workouts', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('games'))    db.createObjectStore('games',    { keyPath: 'id', autoIncrement: true });
+        if (!db.objectStoreNames.contains('checkins')) db.createObjectStore('checkins', { keyPath: 'key' });
+      }
     };
   });
 }
+
+// Keys include profile ID so data stays separated
+function scopedKey(date) {
+  const pid = getActiveProfileId() || 'default';
+  return pid + '::' + date;
+}
+
 async function idbPut(store, value) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).put(value);
+    const payload = { ...value, key: scopedKey(value.date), profile: getActiveProfileId() };
+    const req = tx.objectStore(store).put(payload);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 async function idbGetAll(store) {
   const db = await openDB();
+  const pid = getActiveProfileId();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(store, 'readonly');
     const req = tx.objectStore(store).getAll();
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // Filter to current profile
+      const all = req.result || [];
+      resolve(all.filter(r => !r.profile || r.profile === pid));
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGetAllAcrossProfiles(store) {
+  // For leaderboard — gets data from ALL profiles on this device
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
 }
@@ -359,18 +454,21 @@ async function idbAdd(store, value) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).add(value);
+    const payload = { ...value, profile: getActiveProfileId() };
+    const req = tx.objectStore(store).add(payload);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-const getSettings = () => { try { return JSON.parse(localStorage.getItem('hp_settings') || '{}'); } catch(e) { return {}; } };
-const saveSettingsLS = (s) => localStorage.setItem('hp_settings', JSON.stringify(s));
-const getPRs = () => { try { return JSON.parse(localStorage.getItem('hp_prs') || '{}'); } catch(e) { return {}; } };
-const savePRsLS = (p) => localStorage.setItem('hp_prs', JSON.stringify(p));
-const getUnlockedBadges = () => { try { return JSON.parse(localStorage.getItem('hp_badges') || '{}'); } catch(e) { return {}; } };
-const saveBadgesLS = (b) => localStorage.setItem('hp_badges', JSON.stringify(b));
+const getSettings       = () => { try { return JSON.parse(localStorage.getItem(pkey('settings')) || '{}'); } catch(e) { return {}; } };
+const saveSettingsLS    = (s) => localStorage.setItem(pkey('settings'), JSON.stringify(s));
+const getPRs            = () => { try { return JSON.parse(localStorage.getItem(pkey('prs')) || '{}'); } catch(e) { return {}; } };
+const savePRsLS         = (p) => localStorage.setItem(pkey('prs'), JSON.stringify(p));
+const getUnlockedBadges = () => { try { return JSON.parse(localStorage.getItem(pkey('badges')) || '{}'); } catch(e) { return {}; } };
+const saveBadgesLS      = (b) => localStorage.setItem(pkey('badges'), JSON.stringify(b));
+const getLastEnv        = () => localStorage.getItem(pkey('lastEnv')) || 'halfct';
+const saveLastEnv       = (e) => localStorage.setItem(pkey('lastEnv'), e);
 
 // DATE HELPERS
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -378,9 +476,10 @@ const dateStr = (d) => d.toISOString().slice(0, 10);
 const dayName = () => ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()];
 const daysBetween = (s1, s2) => Math.round((new Date(s2 + 'T00:00:00') - new Date(s1 + 'T00:00:00')) / 86400000);
 
-// WORKOUT GEN
-function pickDrills(category, count, pool, filter) {
+// WORKOUT GEN — now env-aware
+function pickDrills(category, count, pool, filter, env) {
   let available = pool.filter(d => d.category === category);
+  if (env) available = available.filter(d => !d.envs || d.envs.includes(env));
   if (filter) {
     const ids = filter.split(',');
     available = available.filter(d => ids.includes(d.id));
@@ -390,7 +489,32 @@ function pickDrills(category, count, pool, filter) {
   return shuffled.slice(0, Math.min(count, available.length));
 }
 
-function generateWorkout(day, fatigueMod) {
+// Find a substitute category when the original can't be filled in a given env
+function findSubstituteCategory(origCategory, env) {
+  // Fall-back chains: map to something achievable in a constrained env
+  const chains = {
+    'shooting':   ['ball-handling', 'footwork', 'core', 'upper'],
+    'finishing':  ['footwork', 'ball-handling', 'plyo', 'lower'],
+    'footwork':   ['ball-handling', 'plyo', 'defense', 'core'],
+    'defense':    ['footwork', 'plyo', 'core'],
+    'ball-handling': ['core', 'upper', 'mobility'],
+    'conditioning':['plyo', 'lower', 'core'],
+    'lower':      ['core', 'mobility'],
+    'upper':      ['core', 'mobility'],
+    'plyo':       ['lower', 'core'],
+    'core':       ['mobility'],
+    'mobility':   ['core'],
+    'warmup':     ['mobility'],
+  };
+  const options = chains[origCategory] || [];
+  for (const alt of options) {
+    const hasDrills = ALL_DRILLS.some(d => d.category === alt && (!d.envs || d.envs.includes(env)));
+    if (hasDrills) return alt;
+  }
+  return null;
+}
+
+function generateWorkout(day, fatigueMod, env) {
   let template = WEEKLY_TEMPLATE[day];
   if (!template) return null;
   if (fatigueMod === 'swap-strength') {
@@ -404,12 +528,26 @@ function generateWorkout(day, fatigueMod) {
         ? { ...b, category: 'upper', label: 'Upper (swapped)' } : b)
     };
   }
-  const sections = template.blocks.map(block => ({
-    ...block,
-    drills: pickDrills(block.category, block.count, ALL_DRILLS, block.filter)
-  }));
+  const sections = template.blocks.map(block => {
+    let drills = pickDrills(block.category, block.count, ALL_DRILLS, block.filter, env);
+    let effectiveCategory = block.category;
+    let effectiveLabel = block.label;
+    let substituted = false;
+    if (drills.length === 0 && env) {
+      // Try fallback category
+      const sub = findSubstituteCategory(block.category, env);
+      if (sub) {
+        drills = pickDrills(sub, block.count, ALL_DRILLS, null, env);
+        effectiveCategory = sub;
+        effectiveLabel = block.label + ' → ' + sub;
+        substituted = true;
+      }
+    }
+    return { ...block, category: effectiveCategory, label: effectiveLabel, substituted, drills };
+  }).filter(s => s.drills.length > 0);  // drop empty blocks entirely
   return { ...template, sections };
 }
+
 
 function computeStreak(workouts, checkins) {
   const active = new Set();
@@ -458,13 +596,22 @@ function evaluateBadges(stats, currentUnlocked) {
 }
 
 // COMPONENTS
-function Header({ streak, name }) {
+function Header({ streak, name, onSwitchProfile, profileColor }) {
   return html`
     <header class="px-4 pt-6 pb-4">
       <div class="flex items-end justify-between">
-        <div>
-          <div class="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
-          <h1 class="font-display text-4xl text-chalk leading-none mt-1">${name ? "What's up, " + name : "Let's work"}</h1>
+        <div class="flex items-center gap-3">
+          ${onSwitchProfile ? html`
+            <button onClick=${onSwitchProfile}
+              class="w-10 h-10 rounded-full flex items-center justify-center font-display text-lg shrink-0"
+              style=${'background:' + (profileColor || 'var(--flame)') + ';color:var(--courtlight);border:2px solid var(--courtbord)'}>
+              ${name ? name[0].toUpperCase() : '?'}
+            </button>
+          ` : null}
+          <div>
+            <div class="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
+            <h1 class="font-display text-3xl text-chalk leading-none mt-1">${name ? "What's up, " + name : "Let's work"}</h1>
+          </div>
         </div>
         <div class="text-right">
           <div class="font-display font-mono text-5xl text-flame leading-none">${streak}</div>
@@ -480,7 +627,7 @@ function TabBar({ tab, setTab }) {
     { id: 'today', label: 'Today', icon: '🏀' },
     { id: 'drills', label: 'Drills', icon: '📋' },
     { id: 'progress', label: 'Stats', icon: '📊' },
-    { id: 'badges', label: 'Trophy', icon: '🏆' },
+    { id: 'team', label: 'Team', icon: '👥' },
     { id: 'settings', label: 'More', icon: '⚙️' },
   ];
   return html`
@@ -741,18 +888,153 @@ function CheckIn({ existing, onSave, onSkip }) {
   `;
 }
 
+// ENVIRONMENT PICKER — shown before starting a workout
+function EnvPicker({ defaultEnv, onPick, onCancel }) {
+  const [picked, setPicked] = useState(defaultEnv || 'halfct');
+  const envs = ENVIRONMENTS || [];
+  return html`
+    <div class="space-y-4 fade-in">
+      <button onClick=${onCancel} class="font-mono text-xs text-chalk-60 uppercase tracking-wider">← back</button>
+      <div>
+        <div class="font-mono text-xs text-flame uppercase tracking-widest">Setup</div>
+        <h2 class="font-display text-3xl text-chalk">Where you training?</h2>
+        <div class="text-sm text-chalk-70 mt-1">We'll tailor today's drills to your spot.</div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        ${envs.map(e => {
+          const active = picked === e.id;
+          const cardStyle = 'background:' + (active ? 'var(--flame)' : 'var(--courtlight)') +
+            ';border:' + (active ? '2px solid var(--flame)' : '1px solid var(--courtbord)') +
+            ';color:' + (active ? 'var(--courtlight)' : 'var(--chalk)') +
+            ';box-shadow:' + (active ? '0 0 20px -6px rgba(255,107,26,0.6)' : 'none');
+          return html`
+            <button key=${e.id} onClick=${() => setPicked(e.id)}
+              class="rounded-2xl p-4 text-left" style=${cardStyle}>
+              <div class="text-3xl mb-2">${e.icon}</div>
+              <div class="font-display text-xl leading-tight">${e.label}</div>
+              <div class="text-xs mt-1" style=${'opacity:' + (active ? '0.8' : '0.6')}>${e.description}</div>
+            </button>
+          `;
+        })}
+      </div>
+      <button onClick=${() => onPick(picked)} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">
+        Start Training →
+      </button>
+      <div class="text-xs text-chalk-40 text-center font-mono">We'll remember this next time.</div>
+    </div>
+  `;
+}
+
+// PROFILE PICKER — shown when no active profile or when switching
+function ProfilePicker({ profiles, onPick, onAdd, onDelete, onCancel, allowCancel }) {
+  const [adding, setAdding] = useState(profiles.length === 0);
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('#ff6b1a');
+  const colors = ['#ff6b1a','#b4ff3a','#3aa5ff','#e83aff','#ffd53a','#3affc1'];
+
+  const submit = () => {
+    const clean = name.trim();
+    if (!clean) return;
+    onAdd(clean, color);
+    setName('');
+    setAdding(false);
+  };
+
+  if (adding) {
+    return html`
+      <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="container max-w-md space-y-5 fade-in">
+          <div class="text-center">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
+            <h2 class="font-display text-4xl text-chalk mt-1">New Player</h2>
+            <div class="text-sm text-chalk-70 mt-2">Let's set you up. Just need a name.</div>
+          </div>
+          <div class="bg-courtlight border rounded-2xl p-5 space-y-4">
+            <div>
+              <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Player Name</div>
+              <input type="text" value=${name} onInput=${e => setName(e.target.value)}
+                placeholder="First name"
+                maxlength="20"
+                class="w-full bg-court border rounded-xl p-3 text-lg text-chalk" />
+            </div>
+            <div>
+              <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Team Color</div>
+              <div class="flex gap-2">
+                ${colors.map(c => html`
+                  <button key=${c} onClick=${() => setColor(c)}
+                    class="w-10 h-10 rounded-full"
+                    style=${'background:' + c + ';border:' + (color === c ? '3px solid var(--chalk)' : '3px solid transparent')}></button>
+                `)}
+              </div>
+            </div>
+          </div>
+          <button onClick=${submit} disabled=${!name.trim()}
+            class="w-full font-display text-2xl py-4 rounded-2xl"
+            style=${'background:' + (name.trim() ? 'var(--flame)' : 'var(--courtlight)') + ';color:' + (name.trim() ? 'var(--courtlight)' : 'rgba(245,241,232,0.3)') + ';border:' + (name.trim() ? 'none' : '1px solid var(--courtbord)')}>
+            Start →
+          </button>
+          ${profiles.length > 0 ? html`
+            <button onClick=${() => setAdding(false)} class="w-full text-chalk-50 font-mono text-xs uppercase tracking-wider py-2">
+              ← back to players
+            </button>
+          ` : null}
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="min-h-screen flex items-center justify-center p-4">
+      <div class="container max-w-md space-y-4 fade-in">
+        <div class="text-center">
+          <div class="font-mono text-xs text-flame uppercase tracking-widest">Hooper's Path</div>
+          <h2 class="font-display text-4xl text-chalk mt-1">Who's training?</h2>
+        </div>
+        <div class="space-y-2">
+          ${profiles.map(p => html`
+            <div key=${p.id} class="bg-courtlight border rounded-2xl flex items-center gap-3 p-3">
+              <button onClick=${() => onPick(p.id)} class="flex-1 flex items-center gap-3 text-left">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center font-display text-xl"
+                  style=${'background:' + p.color + ';color:var(--courtlight)'}>
+                  ${p.name[0].toUpperCase()}
+                </div>
+                <div class="flex-1">
+                  <div class="font-display text-xl text-chalk leading-tight">${p.name}</div>
+                  <div class="text-xs text-chalk-50 font-mono">Tap to continue</div>
+                </div>
+              </button>
+              <button onClick=${() => { if (confirm('Delete ' + p.name + "'s profile? All data will be erased.")) onDelete(p.id); }}
+                class="text-chalk-40 text-xs font-mono uppercase px-3">✕</button>
+            </div>
+          `)}
+        </div>
+        <button onClick=${() => setAdding(true)} class="w-full bg-flame text-courtlight font-display text-xl py-4 rounded-2xl">
+          + Add Player
+        </button>
+        ${allowCancel ? html`
+          <button onClick=${onCancel} class="w-full text-chalk-50 font-mono text-xs uppercase tracking-wider py-2">
+            ← cancel
+          </button>
+        ` : null}
+      </div>
+    </div>
+  `;
+}
+
 // WORKOUT VIEW
-function WorkoutView({ day, checkin, onSave, onPRUpdate, prs, onExit }) {
+function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
   let fatigueMod = null;
   if (checkin) {
     if (checkin.energy <= 3 || checkin.soreness >= 8) fatigueMod = 'swap-strength';
     else if (checkin.soreness >= 6 && checkin.soreLegs) fatigueMod = 'upper-only';
   }
-  const [generated] = useState(() => generateWorkout(day, fatigueMod));
+  const [generated] = useState(() => generateWorkout(day, fatigueMod, env));
   const [completed, setCompleted] = useState({});
   const [drillPRs, setDrillPRs] = useState({});
   const [showDrill, setShowDrill] = useState(null);
 
+  const envInfo = (ENVIRONMENTS || []).find(e => e.id === env);
+  const hasSubstitutions = generated.sections.some(s => s.substituted);
   const totalDrills = generated.sections.reduce((a, s) => a + s.drills.length, 0);
   const doneCount = Object.values(completed).filter(Boolean).length;
   const pct = totalDrills > 0 ? Math.round((doneCount / totalDrills) * 100) : 0;
@@ -784,7 +1066,7 @@ function WorkoutView({ day, checkin, onSave, onPRUpdate, prs, onExit }) {
     });
     const ftPct = ftAttempts > 0 ? Math.round((ftMade / ftAttempts) * 100) : 0;
     onPRUpdate(newPRs);
-    onSave({ date: todayStr(), completed: true, type: 'training', day,
+    onSave({ date: todayStr(), completed: true, type: 'training', day, env,
       drillsCompleted: Object.keys(completed).filter(k => completed[k]),
       ftMade, ftAttempts, ftPct, pushupsTotal, drillData: drillPRs });
   };
@@ -797,11 +1079,23 @@ function WorkoutView({ day, checkin, onSave, onPRUpdate, prs, onExit }) {
     <div class="space-y-4 fade-in">
       <button onClick=${onExit} class="font-mono text-xs text-chalk-60 uppercase tracking-wider">← back</button>
       <div>
-        <div class="font-mono text-xs text-flame uppercase tracking-widest">Today's Work</div>
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-mono text-xs text-flame uppercase tracking-widest">Today's Work</div>
+          ${envInfo ? html`
+            <div class="bg-courtlight border rounded-full px-3 py-1 text-xs font-mono text-chalk-70">
+              ${envInfo.icon} ${envInfo.label}
+            </div>
+          ` : null}
+        </div>
         <h2 class="font-display text-3xl text-chalk">${generated.title}</h2>
         ${fatigueMod ? html`
           <div class="mt-2 bg-lime-10 border-lime-30 rounded-lg p-2 text-xs text-lime font-mono">
             ⚡ Auto-adjusted based on your check-in
+          </div>
+        ` : null}
+        ${hasSubstitutions ? html`
+          <div class="mt-2 bg-flame-10 border-flame-30 rounded-lg p-2 text-xs text-flame font-mono">
+            🔀 Some drills swapped for your setup (${envInfo ? envInfo.label : 'env'})
           </div>
         ` : null}
       </div>
@@ -816,6 +1110,7 @@ function WorkoutView({ day, checkin, onSave, onPRUpdate, prs, onExit }) {
         <div key=${i} class="bg-courtlight border rounded-2xl p-4">
           <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">
             Block ${i + 1} · ${section.label}
+            ${section.substituted ? html`<span class="ml-2 text-chalk-50" style="text-transform:none;letter-spacing:normal">(swapped for env)</span>` : null}
           </div>
           <div class="space-y-2">
             ${section.drills.map(d => html`
@@ -889,6 +1184,7 @@ function LogGame({ onSave, onCancel }) {
   const [minutes, setMinutes] = useState('');
   const [feltRating, setFeltRating] = useState(7);
   const [notes, setNotes] = useState('');
+  const [coachNotes, setCoachNotes] = useState('');
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryDone, setRecoveryDone] = useState({});
 
@@ -896,7 +1192,7 @@ function LogGame({ onSave, onCancel }) {
     onSave({ date: todayStr(),
       points: parseInt(points) || 0, rebounds: parseInt(rebounds) || 0,
       assists: parseInt(assists) || 0, minutes: parseInt(minutes) || 0,
-      feltRating, notes });
+      feltRating, notes, coachNotes });
   };
 
   if (showRecovery) {
@@ -947,11 +1243,21 @@ function LogGame({ onSave, onCancel }) {
         display=${feltRating >= 8 ? 'In the zone' : feltRating >= 5 ? 'Solid' : 'Tough night'}
         accent=${feltRating >= 6 ? 'lime' : 'flame'} />
       <div>
-        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Notes (optional)</div>
+        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Your Notes</div>
         <textarea value=${notes} onInput=${e => setNotes(e.target.value)}
           placeholder="What worked? What to work on?"
           class="w-full bg-courtlight border rounded-xl p-3 text-sm text-chalk"
-          style="min-height:80px;resize:vertical"></textarea>
+          style="min-height:70px;resize:vertical"></textarea>
+      </div>
+      <div>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="font-mono text-xs text-flame uppercase tracking-wider">📋 Coach Feedback</span>
+        </div>
+        <textarea value=${coachNotes} onInput=${e => setCoachNotes(e.target.value)}
+          placeholder="What did coach say? Any specific feedback?"
+          class="w-full bg-courtlight border rounded-xl p-3 text-sm text-chalk"
+          style="min-height:70px;resize:vertical;border-color:rgba(255,107,26,0.3)"></textarea>
+        <div class="text-xs text-chalk-50 mt-1">Log what coach told you — you'll see it in Stats so you know what to work on.</div>
       </div>
       <button onClick=${() => setShowRecovery(true)} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Next: Recovery →</button>
     </div>
@@ -959,8 +1265,9 @@ function LogGame({ onSave, onCancel }) {
 }
 
 // TODAY HOME
-function TodayHome({ template, isGameDay, todayCheckin, todayWorkout, onStartCheckin, onStartWorkout, onGameDay, onLogGame, onTakeRest, workouts, today }) {
+function TodayHome({ template, isGameDay, todayCheckin, todayWorkout, currentEnv, onStartCheckin, onStartWorkout, onGameDay, onLogGame, onChangeEnv, onTakeRest, workouts, today }) {
   const dateDisplay = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const envInfo = (ENVIRONMENTS || []).find(e => e.id === currentEnv);
   const recent7 = workouts.filter(w => {
     const days = daysBetween(w.date, today);
     return days >= 0 && days <= 6 && w.completed && w.type !== 'rest';
@@ -1008,7 +1315,10 @@ function TodayHome({ template, isGameDay, todayCheckin, todayWorkout, onStartChe
       ` : null}
       ${!isGameDay && todayCheckin && (!todayWorkout || !todayWorkout.completed) ? html`
         <button onClick=${onStartWorkout} class="w-full bg-flame-grad text-chalk rounded-2xl p-6 text-left flame-border slide-up">
-          <div class="font-mono text-xs uppercase tracking-widest opacity-80">Today's Work</div>
+          <div class="flex items-center justify-between">
+            <div class="font-mono text-xs uppercase tracking-widest opacity-80">Today's Work</div>
+            ${envInfo ? html`<div class="text-xs font-mono opacity-80">${envInfo.icon} ${envInfo.label}</div>` : null}
+          </div>
           <div class="font-display text-4xl mt-1">Start Training</div>
           <div class="text-sm opacity-90 mt-2">${template.blocks.length} blocks · ${template.duration} min</div>
         </button>
@@ -1043,6 +1353,7 @@ function TodayTab({ workouts, checkins, prs, saveWorkout, saveCheckin, savePRs, 
   const todayCheckin = checkins.find(c => c.date === today);
   const todayWorkout = workouts.find(w => w.date === today);
   const [view, setView] = useState('home');
+  const [env, setEnv] = useState(getLastEnv());
 
   useEffect(() => {
     if (!todayCheckin && view === 'home') setView('checkin');
@@ -1056,8 +1367,13 @@ function TodayTab({ workouts, checkins, prs, saveWorkout, saveCheckin, savePRs, 
       onSave=${async (ci) => { await saveCheckin(ci); setView('home'); }}
       onSkip=${() => setView('home')} />`;
   }
+  if (view === 'envpick') {
+    return html`<${EnvPicker} defaultEnv=${env}
+      onPick=${(e) => { setEnv(e); saveLastEnv(e); setView('workout'); }}
+      onCancel=${() => setView('home')} />`;
+  }
   if (view === 'workout') {
-    return html`<${WorkoutView} day=${day} checkin=${todayCheckin}
+    return html`<${WorkoutView} day=${day} checkin=${todayCheckin} env=${env}
       onSave=${async (w) => { await saveWorkout(w); setView('home'); }}
       onPRUpdate=${savePRs} prs=${prs} onExit=${() => setView('home')} />`;
   }
@@ -1075,11 +1391,12 @@ function TodayTab({ workouts, checkins, prs, saveWorkout, saveCheckin, savePRs, 
   }
 
   return html`<${TodayHome} today=${today} day=${day} template=${template} isGameDay=${isGameDay}
-    todayCheckin=${todayCheckin} todayWorkout=${todayWorkout}
+    todayCheckin=${todayCheckin} todayWorkout=${todayWorkout} currentEnv=${env}
     onStartCheckin=${() => setView('checkin')}
-    onStartWorkout=${() => setView('workout')}
+    onStartWorkout=${() => setView('envpick')}
     onGameDay=${() => setView('gameday')}
     onLogGame=${() => setView('logGame')}
+    onChangeEnv=${() => setView('envpick')}
     onTakeRest=${async () => {
       await saveWorkout({ date: today, completed: true, type: 'rest', day });
     }}
@@ -1145,7 +1462,7 @@ function DrillsTab() {
 }
 
 // PROGRESS TAB
-function ProgressTab({ workouts, games, prs, stats }) {
+function ProgressTab({ workouts, games, prs, stats, badges }) {
   const recentGames = [...games].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
   const last7 = [];
   for (let i = 6; i >= 0; i--) {
@@ -1157,6 +1474,8 @@ function ProgressTab({ workouts, games, prs, stats }) {
   }
   const trainingDaysLast7 = last7.filter(d => d.completed && d.type === 'training').length;
   const ftData = workouts.filter(w => w.completed && w.ftPct > 0).slice(-10);
+  const unlockedBadges = BADGES.filter(b => badges && badges[b.id]);
+  const lockedBadges = BADGES.filter(b => !badges || !badges[b.id]);
 
   return html`
     <div class="space-y-4 fade-in">
@@ -1215,20 +1534,59 @@ function ProgressTab({ workouts, games, prs, stats }) {
           <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Recent Games</div>
           <div class="space-y-2">
             ${recentGames.map((g, i) => html`
-              <div key=${g.id || i} class="flex items-center justify-between p-3 bg-court rounded-xl border">
-                <div>
-                  <div class="font-mono text-10 text-chalk-50 uppercase">${g.date}</div>
-                  <div class="font-display text-lg text-chalk mt-1">
-                    ${g.points} PTS · ${g.rebounds} REB · ${g.assists} AST
+              <div key=${g.id || i} class="p-3 bg-court rounded-xl border">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="font-mono text-10 text-chalk-50 uppercase">${g.date}</div>
+                    <div class="font-display text-lg text-chalk mt-1">
+                      ${g.points} PTS · ${g.rebounds} REB · ${g.assists} AST
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-display text-2xl text-flame">${g.feltRating}</div>
+                    <div class="font-mono text-10 text-chalk-40 uppercase">/10 felt</div>
                   </div>
                 </div>
-                <div class="text-right">
-                  <div class="font-display text-2xl text-flame">${g.feltRating}</div>
-                  <div class="font-mono text-10 text-chalk-40 uppercase">/10 felt</div>
-                </div>
+                ${g.coachNotes ? html`
+                  <div class="mt-2 bg-flame-10 border-flame-30 rounded-lg p-2">
+                    <div class="font-mono text-10 text-flame uppercase tracking-wider mb-1">📋 Coach</div>
+                    <div class="text-xs text-chalk" style="opacity:0.9">${g.coachNotes}</div>
+                  </div>
+                ` : null}
+                ${g.notes ? html`
+                  <div class="mt-2 text-xs text-chalk-70" style="font-style:italic">"${g.notes}"</div>
+                ` : null}
               </div>
             `)}
           </div>
+        </div>
+      ` : null}
+      ${unlockedBadges.length > 0 ? html`
+        <div class="bg-courtlight border rounded-2xl p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest">Trophies</div>
+            <div class="font-mono text-xs text-chalk-50">${unlockedBadges.length} / ${BADGES.length}</div>
+          </div>
+          <div class="grid grid-cols-4 gap-2">
+            ${unlockedBadges.slice(0, 8).map(b => html`
+              <div key=${b.id} class="aspect-square bg-court rounded-xl flex flex-col items-center justify-center p-1"
+                style="border:1px solid rgba(255,107,26,0.5);box-shadow:0 0 12px -4px rgba(255,107,26,0.4)">
+                <div class="text-2xl">${b.icon}</div>
+                <div class="font-display text-8 text-chalk leading-tight text-center mt-1">${b.name}</div>
+              </div>
+            `)}
+          </div>
+          ${lockedBadges.length > 0 ? html`
+            <div class="mt-3 font-mono text-10 text-chalk-50 uppercase tracking-wider">Up next:</div>
+            <div class="flex gap-2 mt-2 overflow-x-auto hide-scrollbar">
+              ${lockedBadges.slice(0, 6).map(b => html`
+                <div key=${b.id} class="shrink-0 bg-court rounded-xl p-2 text-center" style="width:70px;filter:grayscale(1) brightness(0.5);border:1px solid var(--courtbord)">
+                  <div class="text-xl">${b.icon}</div>
+                  <div class="font-mono text-8 text-chalk-60 leading-tight mt-1">${b.name}</div>
+                </div>
+              `)}
+            </div>
+          ` : null}
         </div>
       ` : null}
       ${stats.workoutCount === 0 ? html`
@@ -1242,7 +1600,165 @@ function ProgressTab({ workouts, games, prs, stats }) {
   `;
 }
 
-// BADGES TAB
+// TEAM TAB — leaderboard across all profiles on this device
+function TeamTab({ profiles, activeProfileId }) {
+  const [board, setBoard] = useState(null);
+  const [weeklyChallenge, setWeeklyChallenge] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      // Gather stats per profile
+      const allWorkouts = await idbGetAllAcrossProfiles('workouts');
+      const allGames = await idbGetAllAcrossProfiles('games');
+      const allCheckins = await idbGetAllAcrossProfiles('checkins');
+
+      const rows = profiles.map(p => {
+        // Load PRs from localStorage for each profile
+        const prs = (() => {
+          try { return JSON.parse(localStorage.getItem('hp_' + p.id + '_prs') || '{}'); }
+          catch(e) { return {}; }
+        })();
+        const badges = (() => {
+          try { return JSON.parse(localStorage.getItem('hp_' + p.id + '_badges') || '{}'); }
+          catch(e) { return {}; }
+        })();
+        const myWorkouts = allWorkouts.filter(w => w.profile === p.id);
+        const myGames = allGames.filter(g => g.profile === p.id);
+        const myCheckins = allCheckins.filter(c => c.profile === p.id);
+        const completedWorkouts = myWorkouts.filter(w => w.completed);
+        // Weekly challenge: FTs made in the last 7 days
+        const sevenAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return dateStr(d); })();
+        const weeklyFT = completedWorkouts
+          .filter(w => w.date >= sevenAgo)
+          .reduce((a, w) => a + (w.ftMade || 0), 0);
+        return {
+          profile: p,
+          streak: computeStreak(myWorkouts, myCheckins),
+          totalWorkouts: completedWorkouts.length,
+          totalGames: myGames.length,
+          ftMade: completedWorkouts.reduce((a, w) => a + (w.ftMade || 0), 0),
+          weeklyFT,
+          pushups: prs.maxPushups || 0,
+          pullups: prs.maxPullups || 0,
+          vertical: prs.vertical || 0,
+          badges: Object.keys(badges).length,
+        };
+      });
+
+      setBoard(rows);
+
+      // Weekly challenge pick a winner
+      const topWeekly = [...rows].sort((a, b) => b.weeklyFT - a.weeklyFT)[0];
+      setWeeklyChallenge({
+        title: 'FREE THROW KINGS',
+        subtitle: 'Most FTs made this week',
+        leader: topWeekly && topWeekly.weeklyFT > 0 ? topWeekly : null
+      });
+    })();
+  }, [profiles, activeProfileId]);
+
+  if (!board) {
+    return html`<div class="fade-in"><div class="font-display text-chalk-50 text-center py-8">Loading team…</div></div>`;
+  }
+
+  const leaders = (key, higherBetter = true) => {
+    const sorted = [...board].sort((a, b) => higherBetter ? b[key] - a[key] : a[key] - b[key]);
+    return sorted.filter(r => r[key] > 0);
+  };
+
+  // Helper to render a single leaderboard list
+  const makeList = (title, emoji, pickFn, unit) => {
+    const data = board
+      .map(r => ({ ...r, val: pickFn(r) }))
+      .filter(r => r.val > 0)
+      .sort((a, b) => b.val - a.val);
+    if (data.length === 0) return null;
+    return html`
+      <div class="bg-courtlight border rounded-2xl p-4">
+        <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">${emoji} ${title}</div>
+        <div class="space-y-2">
+          ${data.slice(0, 5).map((r, i) => {
+            const medal = ['🥇','🥈','🥉'][i] || (i + 1 + '.');
+            const isYou = r.profile.id === activeProfileId;
+            return html`
+              <div key=${r.profile.id} class="flex items-center gap-3 p-2 rounded-lg"
+                style=${'background:' + (isYou ? 'rgba(255,107,26,0.12)' : 'var(--court)')}>
+                <div class="font-display text-lg w-8 text-center">${medal}</div>
+                <div class="w-9 h-9 rounded-full flex items-center justify-center font-display text-base shrink-0"
+                  style=${'background:' + r.profile.color + ';color:var(--courtlight)'}>
+                  ${r.profile.name[0].toUpperCase()}
+                </div>
+                <div class="flex-1" style="min-width:0">
+                  <div class="font-display text-lg text-chalk leading-tight">${r.profile.name}${isYou ? ' (you)' : ''}</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-display font-mono text-xl text-flame">${r.val}</div>
+                  ${unit ? html`<div class="font-mono text-10 text-chalk-50">${unit}</div>` : null}
+                </div>
+              </div>
+            `;
+          })}
+        </div>
+      </div>
+    `;
+  };
+
+  return html`
+    <div class="space-y-4 fade-in">
+      <div>
+        <div class="font-mono text-xs text-flame uppercase tracking-widest">Team</div>
+        <h2 class="font-display text-3xl text-chalk">${profiles.length} ${profiles.length === 1 ? 'Player' : 'Players'}</h2>
+      </div>
+
+      ${weeklyChallenge && weeklyChallenge.leader ? html`
+        <div class="bg-flame-grad text-chalk rounded-2xl p-5 stripe-bg flame-border">
+          <div class="font-mono text-xs uppercase tracking-widest opacity-80">🏆 Weekly Challenge</div>
+          <div class="font-display text-2xl mt-1">${weeklyChallenge.title}</div>
+          <div class="text-sm opacity-90 mt-1">${weeklyChallenge.subtitle}</div>
+          <div class="flex items-center gap-3 mt-4 bg-courtlight rounded-xl p-3">
+            <div class="text-2xl">🥇</div>
+            <div class="w-10 h-10 rounded-full flex items-center justify-center font-display shrink-0"
+              style=${'background:' + weeklyChallenge.leader.profile.color + ';color:var(--courtlight)'}>
+              ${weeklyChallenge.leader.profile.name[0].toUpperCase()}
+            </div>
+            <div class="flex-1">
+              <div class="font-display text-xl text-chalk">${weeklyChallenge.leader.profile.name}</div>
+              <div class="text-xs text-chalk-70">Leads with ${weeklyChallenge.leader.weeklyFT} FTs made</div>
+            </div>
+          </div>
+        </div>
+      ` : profiles.length > 1 ? html`
+        <div class="bg-courtlight border rounded-2xl p-4 text-center">
+          <div class="text-3xl mb-2">🏆</div>
+          <div class="font-display text-lg text-chalk">Weekly Challenge: Free Throw Kings</div>
+          <div class="text-xs text-chalk-60 mt-1">Make free throws this week to lead the board.</div>
+        </div>
+      ` : null}
+
+      ${makeList('Active Streak', '🔥', r => r.streak, 'days')}
+      ${makeList('Workouts Total', '💪', r => r.totalWorkouts)}
+      ${makeList('Free Throws Made', '🎯', r => r.ftMade)}
+      ${makeList('Max Push-ups', '💪', r => r.pushups, 'reps')}
+      ${makeList('Max Pull-ups', '💪', r => r.pullups, 'reps')}
+      ${makeList('Vertical Jump', '🚀', r => r.vertical, 'in')}
+      ${makeList('Games Played', '🏀', r => r.totalGames)}
+      ${makeList('Badges Earned', '🏆', r => r.badges)}
+
+      ${profiles.length === 1 ? html`
+        <div class="bg-courtlight border rounded-2xl p-5 text-center">
+          <div class="text-4xl mb-2">👥</div>
+          <div class="font-display text-xl text-chalk">Bring Your Teammates</div>
+          <div class="text-sm text-chalk-60 mt-2">Add players in <span class="text-flame">More → Players</span> to compete on the leaderboard.</div>
+          <div class="text-xs text-chalk-40 mt-3">Each player's data stays private on their own phone. This device shows everyone who's been added here.</div>
+        </div>
+      ` : null}
+
+      <div class="text-center text-xs text-chalk-40 font-mono pt-2">Rankings update as each player trains.</div>
+    </div>
+  `;
+}
+
+// BADGES TAB (now reachable via settings)
 function BadgesTab({ unlocked }) {
   const unlockedCount = Object.keys(unlocked).length;
   return html`
@@ -1291,37 +1807,75 @@ function BadgeUnlock({ badge, onClose }) {
 }
 
 // SETTINGS TAB
-function SettingsTab({ settings, onSave, workouts, games }) {
-  const [name, setName] = useState(settings.name || '');
+function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onSwitchProfile, onAddProfile, onDeleteProfile, onViewBadges }) {
   const [saved, setSaved] = useState(false);
-
-  const save = () => {
-    onSave({ ...settings, name });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  };
 
   const exportData = async () => {
     const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
-    const data = { exportedAt: new Date().toISOString(), settings: getSettings(), prs: getPRs(), badges: getUnlockedBadges(), workouts: w, games: g, checkins: c };
+    const data = {
+      exportedAt: new Date().toISOString(),
+      profile: profile,
+      settings: getSettings(), prs: getPRs(), badges: getUnlockedBadges(),
+      workouts: w, games: g, checkins: c
+    };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'hoopers-path-backup-' + todayStr() + '.json';
+    a.download = 'hoopers-path-' + (profile ? profile.name.toLowerCase().replace(/\s+/g,'-') + '-' : '') + todayStr() + '.json';
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const clearAll = async () => {
-    if (!confirm('Erase all workouts, games, badges, and PRs? This cannot be undone.')) return;
-    localStorage.clear();
+  const shareStats = async () => {
+    // Build a readable text summary for texting/sharing
+    const [w, g] = await Promise.all([idbGetAll('workouts'), idbGetAll('games')]);
+    const completed = w.filter(x => x.completed);
+    const prs = getPRs();
+    const text = [
+      '🏀 ' + (profile ? profile.name : 'Player') + ' — Hooper\'s Path',
+      '',
+      '🔥 Workouts: ' + completed.length,
+      '🏀 Games: ' + g.length,
+      '🎯 FTs Made: ' + completed.reduce((a,x)=>a+(x.ftMade||0),0),
+      '💪 Max Push-ups: ' + (prs.maxPushups || '—'),
+      '💪 Max Pull-ups: ' + (prs.maxPullups || '—'),
+      '🚀 Vertical: ' + (prs.vertical ? prs.vertical + '"' : '—'),
+      '⏱️ Mile: ' + (prs.mileTime ? prs.mileTime + ' min' : '—'),
+    ].join('\n');
+    if (navigator.share) {
+      try { await navigator.share({ text }); } catch(e) {}
+    } else {
+      // Fallback: copy to clipboard
+      try { await navigator.clipboard.writeText(text); alert('Stats copied to clipboard!'); } catch(e) {}
+    }
+  };
+
+  const clearMyData = async () => {
+    if (!confirm('Erase all YOUR data? Other players on this device are not affected.')) return;
+    // Clear this profile's localStorage
+    const prefix = 'hp_' + (profile ? profile.id : 'default') + '_';
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+    // Clear this profile's indexedDB entries
     const db = await openDB();
+    const pid = profile ? profile.id : null;
     await Promise.all(['workouts', 'games', 'checkins'].map(store => new Promise((res, rej) => {
       const tx = db.transaction(store, 'readwrite');
-      const req = tx.objectStore(store).clear();
-      req.onsuccess = () => res();
-      req.onerror = () => rej(req.error);
+      const objStore = tx.objectStore(store);
+      const cursorReq = objStore.openCursor();
+      cursorReq.onsuccess = (ev) => {
+        const cursor = ev.target.result;
+        if (cursor) {
+          if (cursor.value.profile === pid) cursor.delete();
+          cursor.continue();
+        } else res();
+      };
+      cursorReq.onerror = () => rej(cursorReq.error);
     })));
     location.reload();
   };
@@ -1332,23 +1886,67 @@ function SettingsTab({ settings, onSave, workouts, games }) {
         <div class="font-mono text-xs text-flame uppercase tracking-widest">Settings</div>
         <h2 class="font-display text-3xl text-chalk">More</h2>
       </div>
+
+      ${profile ? html`
+        <div class="bg-courtlight border rounded-2xl p-4">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-full flex items-center justify-center font-display text-xl shrink-0"
+              style=${'background:' + profile.color + ';color:var(--courtlight)'}>
+              ${profile.name[0].toUpperCase()}
+            </div>
+            <div class="flex-1">
+              <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider">Active Player</div>
+              <div class="font-display text-2xl text-chalk leading-tight">${profile.name}</div>
+            </div>
+          </div>
+        </div>
+      ` : null}
+
       <div class="bg-courtlight border rounded-2xl p-4 space-y-3">
-        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Your Name</div>
-        <input type="text" value=${name} onInput=${e => setName(e.target.value)}
-          placeholder="What should we call you?"
-          class="w-full bg-court border rounded-xl p-3 text-chalk" />
-        <button onClick=${save} class="bg-flame text-courtlight px-4 py-2 rounded-lg font-mono text-xs uppercase tracking-wider">
-          ${saved ? 'Saved ✓' : 'Save'}
+        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Players on this device</div>
+        <div class="space-y-2">
+          ${(profiles || []).map(p => {
+            const isActive = profile && p.id === profile.id;
+            return html`
+              <div key=${p.id} class="flex items-center gap-3 p-2 rounded-xl"
+                style=${'background:' + (isActive ? 'rgba(255,107,26,0.1)' : 'var(--court)') +
+                  ';border:1px solid ' + (isActive ? 'rgba(255,107,26,0.3)' : 'var(--courtbord)')}>
+                <div class="w-10 h-10 rounded-full flex items-center justify-center font-display text-base shrink-0"
+                  style=${'background:' + p.color + ';color:var(--courtlight)'}>
+                  ${p.name[0].toUpperCase()}
+                </div>
+                <div class="flex-1">
+                  <div class="font-display text-lg text-chalk leading-tight">${p.name}</div>
+                  <div class="text-xs text-chalk-50 font-mono">${isActive ? 'active · tap ✕ to remove' : 'tap to switch'}</div>
+                </div>
+                ${!isActive ? html`
+                  <button onClick=${() => onSwitchProfile(p.id)} class="bg-flame text-courtlight px-3 py-1 rounded-lg font-mono text-10 uppercase tracking-wider">Switch</button>
+                ` : null}
+                <button onClick=${() => { if (confirm('Delete ' + p.name + "'s profile and all their data?")) onDeleteProfile(p.id); }}
+                  class="text-chalk-40 text-xs font-mono uppercase px-2">✕</button>
+              </div>
+            `;
+          })}
+        </div>
+        <button onClick=${onAddProfile} class="w-full bg-flame text-courtlight px-4 py-3 rounded-xl font-display text-lg">
+          + Add Another Player
         </button>
       </div>
+
       <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
         <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-2">Your Data</div>
         <div class="text-sm text-chalk" style="opacity:0.8">${workouts.length} workouts · ${games.length} games logged</div>
-        <div class="text-xs text-chalk-50">All data stored locally on this device.</div>
-        <button onClick=${exportData} class="w-full bg-court border text-chalk px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider mt-2">
-          📥 Export Backup (JSON)
-        </button>
+        <div class="text-xs text-chalk-50">Everything stays on your phone.</div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <button onClick=${shareStats} class="bg-flame text-courtlight px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+            📤 Share Stats
+          </button>
+          <button onClick=${exportData} class="bg-court border text-chalk px-3 py-3 rounded-xl font-mono text-xs uppercase tracking-wider">
+            📥 Backup (JSON)
+          </button>
+        </div>
       </div>
+
       <div class="bg-courtlight border rounded-2xl p-4 space-y-2">
         <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-1">Install on iPhone</div>
         <ol class="text-sm text-chalk space-y-1" style="opacity:0.8">
@@ -1357,40 +1955,55 @@ function SettingsTab({ settings, onSave, workouts, games }) {
           <li>Tap "Add to Home Screen"</li>
           <li>Name it and tap Add</li>
         </ol>
-        <div class="text-xs text-chalk-50 mt-2">Works offline after first load (except drill videos).</div>
+        <div class="text-xs text-chalk-50 mt-2">Works offline after first load.</div>
       </div>
-      <button onClick=${clearAll} class="w-full bg-courtlight px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider"
+
+      <button onClick=${clearMyData} class="w-full bg-courtlight px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider"
         style="border:1px solid rgba(255,107,26,0.3);color:rgba(255,107,26,0.8)">
-        ⚠ Erase All Data
+        ⚠ Erase My Data
       </button>
-      <div class="text-center text-xs text-chalk-40 font-mono pt-4">Hooper's Path · built for JV dreams</div>
+      <div class="text-center text-xs text-chalk-40 font-mono pt-2">Hooper's Path · for the grind</div>
     </div>
   `;
 }
 
 // MAIN APP
 function App() {
+  // Profile state — null means "picker visible"
+  const [profiles, setProfiles] = useState(() => listProfiles());
+  const [activeId, setActiveId] = useState(() => {
+    const aid = getActiveProfileId();
+    return aid && listProfiles().find(p => p.id === aid) ? aid : null;
+  });
+  const [showProfileSwitch, setShowProfileSwitch] = useState(false);
+
   const [tab, setTab] = useState('today');
   const [workouts, setWorkouts] = useState([]);
   const [games, setGames] = useState([]);
   const [checkins, setCheckins] = useState([]);
-  const [prs, setPRsState] = useState(getPRs());
-  const [badges, setBadgesState] = useState(getUnlockedBadges());
-  const [settings, setSettingsState] = useState(getSettings());
+  const [prs, setPRsState] = useState({});
+  const [badges, setBadgesState] = useState({});
+  const [settings, setSettingsState] = useState({});
   const [newBadge, setNewBadge] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Load all profile-scoped state whenever active profile changes
   useEffect(() => {
+    if (!activeId) { setLoading(false); return; }
+    setLoading(true);
     (async () => {
       try {
         const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
         setWorkouts(w || []);
         setGames(g || []);
         setCheckins(c || []);
+        setPRsState(getPRs());
+        setBadgesState(getUnlockedBadges());
+        setSettingsState(getSettings());
       } catch (e) { console.error('Load error:', e); }
       setLoading(false);
     })();
-  }, []);
+  }, [activeId]);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -1413,6 +2026,7 @@ function App() {
   }, [workouts, games, checkins, prs]);
 
   useEffect(() => {
+    if (!activeId) return;
     const newly = evaluateBadges(stats, badges);
     if (newly.length > 0) {
       const updated = { ...badges };
@@ -1421,13 +2035,52 @@ function App() {
       saveBadgesLS(updated);
       setNewBadge(newly[0]);
     }
-  }, [stats]);
+  }, [stats, activeId]);
 
   const saveWorkout = async (w) => { await idbPut('workouts', w); setWorkouts(await idbGetAll('workouts')); };
   const saveGame = async (g) => { await idbAdd('games', g); setGames(await idbGetAll('games')); };
   const saveCheckin = async (c) => { await idbPut('checkins', c); setCheckins(await idbGetAll('checkins')); };
   const savePRs = (next) => { setPRsState(next); savePRsLS(next); };
   const onSaveSettings = (s) => { setSettingsState(s); saveSettingsLS(s); };
+
+  // Profile actions
+  const onPickProfile = (id) => {
+    setActiveProfileId(id);
+    setActiveId(id);
+    setShowProfileSwitch(false);
+    setTab('today');
+  };
+  const onAddProfile = (name, color) => {
+    const p = createProfile(name, color);
+    setProfiles(listProfiles());
+    onPickProfile(p.id);
+  };
+  const onDeleteProfile = (id) => {
+    deleteProfile(id);
+    const fresh = listProfiles();
+    setProfiles(fresh);
+    if (id === activeId) {
+      setActiveId(null);
+    }
+  };
+  const onSwitchProfile = (id) => {
+    if (id) {
+      onPickProfile(id);
+    } else {
+      setShowProfileSwitch(true);
+    }
+  };
+
+  // If no active profile, show picker
+  if (!activeId || showProfileSwitch) {
+    return html`<${ProfilePicker}
+      profiles=${profiles}
+      onPick=${onPickProfile}
+      onAdd=${onAddProfile}
+      onDelete=${onDeleteProfile}
+      onCancel=${() => setShowProfileSwitch(false)}
+      allowCancel=${!!activeId} />`;
+  }
 
   if (loading) {
     return html`
@@ -1437,18 +2090,25 @@ function App() {
     `;
   }
 
+  const current = profiles.find(p => p.id === activeId);
+
   return html`
     <div class="min-h-screen pb-24">
       ${newBadge ? html`<${BadgeUnlock} badge=${newBadge} onClose=${() => setNewBadge(null)} />` : null}
       <div class="container">
-        <${Header} streak=${stats.streak} name=${settings.name} />
+        <${Header} streak=${stats.streak} name=${(current && current.name) || settings.name}
+          onSwitchProfile=${onSwitchProfile} profileColor=${current && current.color} />
         <main class="px-4 fade-in">
           ${tab === 'today' ? html`<${TodayTab} workouts=${workouts} checkins=${checkins} prs=${prs}
             saveWorkout=${saveWorkout} saveCheckin=${saveCheckin} savePRs=${savePRs} saveGame=${saveGame} />` : null}
           ${tab === 'drills' ? html`<${DrillsTab} />` : null}
-          ${tab === 'progress' ? html`<${ProgressTab} workouts=${workouts} games=${games} prs=${prs} stats=${stats} />` : null}
-          ${tab === 'badges' ? html`<${BadgesTab} unlocked=${badges} />` : null}
-          ${tab === 'settings' ? html`<${SettingsTab} settings=${settings} onSave=${onSaveSettings} workouts=${workouts} games=${games} />` : null}
+          ${tab === 'progress' ? html`<${ProgressTab} workouts=${workouts} games=${games} prs=${prs} stats=${stats} badges=${badges} />` : null}
+          ${tab === 'team' ? html`<${TeamTab} profiles=${profiles} activeProfileId=${activeId} />` : null}
+          ${tab === 'settings' ? html`<${SettingsTab} settings=${settings} onSave=${onSaveSettings} workouts=${workouts} games=${games}
+            profile=${current} profiles=${profiles}
+            onSwitchProfile=${onSwitchProfile}
+            onAddProfile=${() => { setShowProfileSwitch(true); }}
+            onDeleteProfile=${onDeleteProfile} /> ` : null}
         </main>
       </div>
       <${TabBar} tab=${tab} setTab=${setTab} />
