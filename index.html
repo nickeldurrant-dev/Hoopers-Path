@@ -2188,6 +2188,14 @@ function App() {
     return waitForAuth();
   }, []);
 
+  // Profile state — null means "picker visible"
+  const [profiles, setProfiles] = useState(() => listProfiles());
+  const [activeId, setActiveId] = useState(() => {
+    const aid = getActiveProfileId();
+    return aid && listProfiles().find(p => p.id === aid) ? aid : null;
+  });
+  const [showProfileSwitch, setShowProfileSwitch] = useState(false);
+
   // When signed in but no local profile, try to restore from cloud
   useEffect(() => {
     if (!authSession.user || activeId || !window.HOOPERS_SYNC) return;
@@ -2209,14 +2217,6 @@ function App() {
       }
     })();
   }, [authSession.user, activeId]);
-
-  // Profile state — null means "picker visible"
-  const [profiles, setProfiles] = useState(() => listProfiles());
-  const [activeId, setActiveId] = useState(() => {
-    const aid = getActiveProfileId();
-    return aid && listProfiles().find(p => p.id === aid) ? aid : null;
-  });
-  const [showProfileSwitch, setShowProfileSwitch] = useState(false);
 
   const [tab, setTab] = useState('today');
   const [workouts, setWorkouts] = useState([]);
