@@ -2294,6 +2294,16 @@ function App() {
         }
       } catch (e) {
         console.error('Hydrate flow error:', e);
+        // Don't silently fail — show the user what happened
+        const el = document.getElementById('error-display');
+        if (el) {
+          el.style.display = 'block';
+          el.textContent = 'SYNC ERROR after sign-in:\n\n' + (e.message || String(e)) +
+            '\n\nThis usually means Firestore security rules need to be published, ' +
+            'or the Firestore database does not exist yet.\n\n' +
+            'Tap to dismiss and continue offline.';
+          el.onclick = () => { el.style.display = 'none'; el.onclick = null; };
+        }
       }
       setHydrating(false);
     })();

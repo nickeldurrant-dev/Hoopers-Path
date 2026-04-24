@@ -11,6 +11,9 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
+  setPersistence,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore,
@@ -33,6 +36,22 @@ try {
 }
 
 const auth = getAuth(app);
+
+// Force persistent auth on iOS PWA — try IndexedDB first, fall back to localStorage
+// Without this, sign-in bounces back immediately in PWA mode on iOS
+(async () => {
+  try {
+    await setPersistence(auth, indexedDBLocalPersistence);
+    console.log('Auth persistence: IndexedDB');
+  } catch (e1) {
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      console.log('Auth persistence: localStorage (fallback)');
+    } catch (e2) {
+      console.warn('Could not set auth persistence:', e2);
+    }
+  }
+})();
 
 // Apple provider
 const appleProvider = new OAuthProvider('apple.com');
@@ -62,6 +81,14 @@ getRedirectResult(auth).then(result => {
   console.error('Redirect result error:', err);
   session.error = err.message || String(err);
   notify();
+  // Also show in the big error display
+  const el = document.getElementById('error-display');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = 'SIGN-IN ERROR:\n\n' + (err.code || '') + '\n\n' + (err.message || String(err)) +
+      '\n\nTap to dismiss.';
+    el.onclick = () => { el.style.display = 'none'; el.onclick = null; };
+  }
 });
 
 // Watch for auth state changes
