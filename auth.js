@@ -20,19 +20,9 @@ import {
   initializeFirestore,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-// DEBUG: Log every auth event visibly to a debug overlay so we can diagnose silent failures
+// Debug logging — silent in production, only logs to console
 function debugLog(msg) {
   console.log('[AUTH]', msg);
-  let el = document.getElementById('debug-display');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'debug-display';
-    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(0,255,0,0.85);color:#000;padding:8px;font:11px monospace;z-index:99999;max-height:40vh;overflow:auto;white-space:pre-wrap;border-top:2px solid #000';
-    document.body.appendChild(el);
-    el.onclick = () => { el.style.display = 'none'; };
-  }
-  el.textContent = (el.textContent || '') + new Date().toISOString().slice(11,19) + ' ' + msg + '\n';
-  el.scrollTop = el.scrollHeight;
 }
 
 debugLog('auth.js loaded');
