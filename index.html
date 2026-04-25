@@ -1020,12 +1020,27 @@ function SignInScreen({ error, onSignIn }) {
     finally { setSigning(false); }
   };
   return html`
-    <div class="min-h-screen flex flex-col justify-center px-6 fade-in" style="background:radial-gradient(ellipse at top, rgba(255,107,26,0.12), transparent 60%), var(--court)">
-      <div class="container text-center space-y-6">
+    <div class="min-h-screen flex flex-col justify-center px-6 py-10 fade-in" style="background:radial-gradient(ellipse at top, rgba(255,107,26,0.15), transparent 60%), var(--court)">
+      <div class="container text-center space-y-6 max-w-md">
         <div>
           <div class="font-mono text-xs text-flame uppercase tracking-widest">Welcome to</div>
           <h1 class="font-display text-6xl text-chalk leading-none mt-2">Hooper's Path</h1>
-          <div class="text-sm text-chalk-70 mt-3">Train like a pro. Track everything. Build the habit.</div>
+          <div class="text-base text-chalk-70 mt-3 leading-snug">Daily workouts, drills, and game tracking — built for high school hoopers.</div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="bg-courtlight border rounded-xl p-3">
+            <div class="text-2xl mb-1">🏀</div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider">Daily Workouts</div>
+          </div>
+          <div class="bg-courtlight border rounded-xl p-3">
+            <div class="text-2xl mb-1">📊</div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider">Track PRs</div>
+          </div>
+          <div class="bg-courtlight border rounded-xl p-3">
+            <div class="text-2xl mb-1">🏆</div>
+            <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider">Earn Badges</div>
+          </div>
         </div>
 
         <div class="bg-courtlight border rounded-2xl p-6 space-y-4 flame-border">
@@ -1035,7 +1050,12 @@ function SignInScreen({ error, onSignIn }) {
           <button onClick=${handle} disabled=${signing}
             class="w-full font-display text-lg py-4 rounded-2xl flex items-center justify-center gap-2"
             style="background:#000;color:#fff;border:1px solid #555">
-            ${signing ? 'Signing in…' : html`<span></span><span>Sign in with Apple</span>`}
+            ${signing ? html`<span>Signing in…</span>` : html`
+              <svg width="18" height="22" viewBox="0 0 18 22" fill="white" style="margin-right:8px;margin-top:-2px">
+                <path d="M14.94 17.5c-.5 1.16-.74 1.68-1.39 2.7-.91 1.43-2.19 3.21-3.78 3.22-1.41.02-1.78-.92-3.7-.91-1.92.01-2.32.93-3.74.91C.74 23.4-.46 21.8-1.37 20.37-3.91 16.39-4.18 11.72-2.61 9.24c1.11-1.76 2.86-2.79 4.51-2.79 1.68 0 2.74.92 4.13.92 1.35 0 2.17-.92 4.12-.92 1.47 0 3.03.8 4.14 2.18-3.64 1.99-3.05 7.19.65 8.87zM10.95 4.79c.71-.91 1.25-2.2 1.05-3.51-1.16.08-2.51.82-3.3 1.78-.72.87-1.31 2.16-1.08 3.43 1.26.04 2.57-.71 3.33-1.7z" transform="translate(2 0)"/>
+              </svg>
+              <span>Sign in with Apple</span>
+            `}
           </button>
 
           ${error ? html`
@@ -1045,9 +1065,9 @@ function SignInScreen({ error, onSignIn }) {
           ` : null}
         </div>
 
-        <div class="text-xs text-chalk-50 font-mono space-y-1">
-          <div>By signing in you confirm you're 13 or older.</div>
-          <div>Your workouts, PRs, and games sync to your Apple ID account.</div>
+        <div class="text-xs text-chalk-50 font-mono space-y-1 leading-relaxed">
+          <div>13+ only · Free to use · Works offline</div>
+          <div>Your data syncs privately to your Apple ID</div>
         </div>
       </div>
     </div>
@@ -2071,6 +2091,8 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
         <div class="text-xs text-chalk-50 mt-2">Works offline after first load.</div>
       </div>
 
+      <${FeedbackSection} />
+
       <${AccountSection} />
 
       <button onClick=${clearMyData} class="w-full bg-courtlight px-4 py-3 rounded-xl font-mono text-xs uppercase tracking-wider"
@@ -2079,6 +2101,35 @@ function SettingsTab({ settings, onSave, workouts, games, profile, profiles, onS
       </button>
       <div class="text-center text-xs text-chalk-40 font-mono pt-2">Hooper's Path · for the grind</div>
     </div>
+  `;
+}
+
+function FeedbackSection() {
+  const subject = encodeURIComponent("Hooper's Path Feedback");
+  const body = encodeURIComponent(
+    "What's working / not working / would be cool to add:\n\n\n\n" +
+    "---\n" +
+    "Device: " + (navigator.userAgent.includes('iPhone') ? 'iPhone' : navigator.userAgent.includes('iPad') ? 'iPad' : 'Other') + "\n" +
+    "App version: v11"
+  );
+  // *** IMPORTANT: change this email before sending to testers ***
+  // Use your personal Gmail or any inbox you check daily.
+  // Once hooperspath.com email forwarding is set up, change to feedback@hooperspath.com
+  const feedbackEmail = "YOUR_EMAIL_HERE@gmail.com";
+  const mailto = "mailto:" + feedbackEmail + "?subject=" + subject + "&body=" + body;
+
+  return html`
+    <a href=${mailto} class="block w-full bg-courtlight border rounded-2xl p-4 text-left no-underline"
+      style="text-decoration:none;border-color:rgba(180,255,58,0.3)">
+      <div class="flex items-center gap-3">
+        <div class="text-2xl">💬</div>
+        <div class="flex-1">
+          <div class="font-display text-lg text-chalk leading-tight" style="color:var(--lime)">Send Feedback</div>
+          <div class="text-xs text-chalk-60 mt-1">Tell us what to fix or build next</div>
+        </div>
+        <div class="text-chalk-40">›</div>
+      </div>
+    </a>
   `;
 }
 
