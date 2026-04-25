@@ -129,31 +129,28 @@ onAuthStateChanged(auth, (user) => {
   notify();
 });
 
-// Sign in: tries popup first, falls back to redirect (popups are often blocked on iOS)
+// Sign in: use popup for all platforms. signInWithRedirect is broken on iOS Safari
+// due to cross-domain isolation (Storage Access API issues).
 async function signInWithApple() {
   try {
-    // On iOS Safari, popup often fails silently. Use redirect for reliability.
-    // Detect iOS: UA includes "iPhone" or "iPad", or Mac with touch (iPad)
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1);
-    debugLog('signInWithApple called, isIOS=' + isIOS);
-    if (isIOS) {
-      debugLog('Calling signInWithRedirect...');
-      await signInWithRedirect(auth, appleProvider);
-      debugLog('Redirect issued (you should be navigating to Apple now)');
-      // Page will navigate away; getRedirectResult handles return
-      return { pending: true };
-    } else {
-      debugLog('Calling signInWithPopup...');
-      const result = await signInWithPopup(auth, appleProvider);
-      debugLog('Popup SUCCESS uid=' + result.user.uid.slice(0,8));
-      return { user: result.user };
-    }
+    debugLog('signInWithApple called - using popup');
+    debugLog('Calling signInWithPopup...');
+    const result = await signInWithPopup(auth, appleProvider);
+    debugLog('Popup SUCCESS uid=' + result.user.uid.slice(0,8));
+    return { user: result.user };
   } catch (err) {
     debugLog('signIn ERROR: ' + (err.code || '') + ' - ' + (err.message || String(err)).slice(0, 200));
     console.error('Apple sign in error:', err);
     session.error = err.message || String(err);
     notify();
+    // Show error visibly
+    const el = document.getElementById('error-display');
+    if (el) {
+      el.style.display = 'block';
+      el.textContent = 'SIGN-IN ERROR:\n\n' + (err.code || '') + '\n\n' + (err.message || String(err)) +
+        '\n\nTap to dismiss.';
+      el.onclick = () => { el.style.display = 'none'; el.onclick = null; };
+    }
     return { error: err };
   }
 }
