@@ -286,6 +286,7 @@ setTimeout(function() {
 <script src="./drills-data.js"></script>
 <script src="./diagrams.js"></script>
 <script src="./firebase-config.js"></script>
+<script src="./feature-flags.js"></script>
 <script type="module" src="./auth.js"></script>
 <script type="module" src="./sync.js"></script>
 
@@ -517,9 +518,48 @@ function findSubstituteCategory(origCategory, env) {
   return null;
 }
 
-function generateWorkout(day, fatigueMod, env) {
+function generateWorkout(day, fatigueMod, env, gameContext) {
   let template = WEEKLY_TEMPLATE[day];
   if (!template) return null;
+
+  // GAME-AWARE OVERRIDES — these take priority over fatigueMod
+  // gameContext: { gameToday, gameTomorrow, playedYesterday }
+  if (gameContext) {
+    if (gameContext.gameToday && gameContext.gameTomorrow) {
+      // Back-to-back games — minimal work, mobility/shooting only
+      template = { ...template, title: 'Tournament Day — Minimal',
+        blocks: [
+          { label: 'Mobility', category: 'mobility', count: 2 },
+          { label: 'Form Shooting (light)', category: 'shooting', count: 2 },
+        ]
+      };
+    } else if (gameContext.gameToday) {
+      // Game day — pre-game warmup template
+      template = WEEKLY_TEMPLATE.saturday || template;
+      template = { ...template, title: 'Game Day Warmup' };
+    } else if (gameContext.gameTomorrow) {
+      // Day before game — skip heavy legs, light shooting + upper + mobility
+      template = { ...template, title: template.title + ' (Game Tomorrow)',
+        blocks: template.blocks.map(b => {
+          if (b.category === 'lower' || b.category === 'plyo' || b.category === 'conditioning') {
+            return { ...b, category: 'mobility', label: 'Mobility (saving legs)' };
+          }
+          return b;
+        })
+      };
+    } else if (gameContext.playedYesterday) {
+      // Day after game — recovery focused
+      template = { ...template, title: 'Recovery (Played Yesterday)',
+        blocks: [
+          { label: 'Mobility', category: 'mobility', count: 3 },
+          { label: 'Light Shooting', category: 'shooting', count: 2 },
+          { label: 'Light Upper', category: 'upper', count: 2 },
+        ]
+      };
+    }
+  }
+
+  // Fatigue adjustments (only if no game context overrode)
   if (fatigueMod === 'swap-strength') {
     template = { ...template, title: template.title + ' (Adjusted)',
       blocks: template.blocks.map(b => (b.category === 'lower' || b.category === 'upper' || b.category === 'plyo')
@@ -837,9 +877,16 @@ function CheckIn({ existing, onSave, onSkip }) {
   const [soreLegs, setSoreLegs] = useState((existing && existing.soreLegs) || false);
   const [energy, setEnergy] = useState((existing && existing.energy) || 7);
   const [nutrition, setNutrition] = useState((existing && existing.nutrition) || 'good');
+  const [gameToday, setGameToday] = useState((existing && existing.gameToday) || false);
+  const [gameTomorrow, setGameTomorrow] = useState((existing && existing.gameTomorrow) || false);
+  const [playedYesterday, setPlayedYesterday] = useState((existing && existing.playedYesterday) || false);
 
   const submit = () => {
-    onSave({ date: todayStr(), sleepHours: sleep, soreness, soreLegs, energy, nutrition, recoveryLogged: true });
+    onSave({
+      date: todayStr(), sleepHours: sleep, soreness, soreLegs, energy, nutrition,
+      gameToday, gameTomorrow, playedYesterday,
+      recoveryLogged: true
+    });
   };
 
   return html`
@@ -885,6 +932,42 @@ function CheckIn({ existing, onSave, onSkip }) {
           `)}
         </div>
       </div>
+
+      <div class="bg-courtlight border rounded-xl p-4 space-y-3" style="border-color:rgba(255,107,26,0.3)">
+        <div class="font-mono text-xs text-flame uppercase tracking-wider">🏀 Game Schedule</div>
+        <div class="text-xs text-chalk-60">Lets us adjust today's training so your legs are fresh for games.</div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-chalk">Got a game today?</span>
+          <div class="flex gap-2">
+            <button onClick=${() => setGameToday(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (gameToday ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (gameToday ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
+            <button onClick=${() => setGameToday(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (!gameToday ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!gameToday ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-chalk">Game tomorrow?</span>
+          <div class="flex gap-2">
+            <button onClick=${() => setGameTomorrow(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (gameTomorrow ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (gameTomorrow ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
+            <button onClick=${() => setGameTomorrow(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (!gameTomorrow ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!gameTomorrow ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-chalk">Played yesterday?</span>
+          <div class="flex gap-2">
+            <button onClick=${() => setPlayedYesterday(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (playedYesterday ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (playedYesterday ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
+            <button onClick=${() => setPlayedYesterday(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
+              style=${'background:' + (!playedYesterday ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!playedYesterday ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
+          </div>
+        </div>
+      </div>
+
       <button onClick=${submit} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Save Check-In</button>
       <button onClick=${onSkip} class="w-full text-chalk-50 font-mono text-xs uppercase tracking-wider py-2">Skip for now</button>
     </div>
@@ -1094,10 +1177,25 @@ function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
     if (checkin.energy <= 3 || checkin.soreness >= 8) fatigueMod = 'swap-strength';
     else if (checkin.soreness >= 6 && checkin.soreLegs) fatigueMod = 'upper-only';
   }
-  const [generated] = useState(() => generateWorkout(day, fatigueMod, env));
+  const gameContext = checkin ? {
+    gameToday: !!checkin.gameToday,
+    gameTomorrow: !!checkin.gameTomorrow,
+    playedYesterday: !!checkin.playedYesterday,
+  } : null;
+  const hasGameContext = gameContext && (gameContext.gameToday || gameContext.gameTomorrow || gameContext.playedYesterday);
+  const [generated] = useState(() => generateWorkout(day, fatigueMod, env, gameContext));
   const [completed, setCompleted] = useState({});
   const [drillPRs, setDrillPRs] = useState({});
   const [showDrill, setShowDrill] = useState(null);
+
+  const gameNotice = (() => {
+    if (!gameContext) return null;
+    if (gameContext.gameToday && gameContext.gameTomorrow) return '⚠️ Back-to-back games — minimal training today';
+    if (gameContext.gameToday) return '🏀 Game today — pre-game warmup mode';
+    if (gameContext.gameTomorrow) return '🏀 Game tomorrow — keeping your legs fresh';
+    if (gameContext.playedYesterday) return '💤 Recovery day — you played yesterday';
+    return null;
+  })();
 
   const envInfo = (ENVIRONMENTS || []).find(e => e.id === env);
   const hasSubstitutions = generated.sections.some(s => s.substituted);
@@ -1154,7 +1252,13 @@ function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
           ` : null}
         </div>
         <h2 class="font-display text-3xl text-chalk">${generated.title}</h2>
-        ${fatigueMod ? html`
+        ${gameNotice ? html`
+          <div class="mt-2 rounded-lg p-2 text-xs font-mono"
+            style="background:rgba(255,107,26,0.15);border:1px solid rgba(255,107,26,0.4);color:var(--flame)">
+            ${gameNotice}
+          </div>
+        ` : null}
+        ${fatigueMod && !hasGameContext ? html`
           <div class="mt-2 bg-lime-10 border-lime-30 rounded-lg p-2 text-xs text-lime font-mono">
             ⚡ Auto-adjusted based on your check-in
           </div>

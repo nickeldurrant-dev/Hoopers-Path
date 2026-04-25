@@ -1,11 +1,12 @@
 // Hooper's Path service worker - offline-first caching
-const CACHE_NAME = 'hoopers-path-v10';
+const CACHE_NAME = 'hoopers-path-v11';
 const ASSETS = [
   './',
   './index.html',
   './drills-data.js',
   './diagrams.js',
   './firebase-config.js',
+  './feature-flags.js',
   './auth.js',
   './sync.js',
   './manifest.json',
