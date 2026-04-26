@@ -2725,6 +2725,8 @@ function App() {
   const [newBadge, setNewBadge] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hydrating, setHydrating] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateRegistration, setUpdateRegistration] = useState(null);
 
   // When signed-in user becomes available AND there's a local profile, hydrate from cloud
   useEffect(() => {
@@ -2825,10 +2827,48 @@ function App() {
   }, [activeId]);
 
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(e => console.log('SW:', e));
-    }
+    if (!('serviceWorker' in navigator)) return;
+    let registration;
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      registration = reg;
+      setUpdateRegistration(reg);
+
+      // Check for updates every 60 seconds while the app is open
+      const checkInterval = setInterval(() => {
+        reg.update().catch(() => {});
+      }, 60000);
+
+      // Listen for a new SW being installed
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // A new version is ready and waiting
+            setUpdateAvailable(true);
+          }
+        });
+      });
+
+      return () => clearInterval(checkInterval);
+    }).catch(e => console.log('SW:', e));
+
+    // Reload when the new SW takes over
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
   }, []);
+
+  const applyUpdate = () => {
+    if (updateRegistration && updateRegistration.waiting) {
+      updateRegistration.waiting.postMessage('SKIP_WAITING');
+    } else {
+      window.location.reload();
+    }
+  };
 
   const stats = useMemo(() => {
     const completed = workouts.filter(w => w.completed);
@@ -2979,6 +3019,26 @@ function App() {
 
   return html`
     <div class="min-h-screen pb-24">
+      ${updateAvailable ? html`
+        <div class="sticky top-0 z-50 cursor-pointer"
+          style="background:linear-gradient(90deg, var(--flame), #ff8c47);color:var(--courtlight)"
+          onClick=${applyUpdate}>
+          <div class="container px-4 py-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span style="font-size:18px">🔄</span>
+              <div>
+                <div class="font-display text-sm leading-tight">New version ready</div>
+                <div class="font-mono text-10 uppercase tracking-wider" style="opacity:0.8">Tap to update</div>
+              </div>
+            </div>
+            <button onClick=${(e) => { e.stopPropagation(); applyUpdate(); }}
+              class="font-mono text-xs uppercase tracking-wider px-4 py-2 rounded-lg"
+              style="background:rgba(255,255,255,0.2);color:var(--courtlight)">
+              Update
+            </button>
+          </div>
+        </div>
+      ` : null}
       ${newBadge ? html`<${BadgeUnlock} badge=${newBadge} onClose=${() => setNewBadge(null)} />` : null}
       <div class="container">
         <${Header} streak=${stats.streak} name=${(current && current.name) || settings.name}
