@@ -1746,8 +1746,53 @@ function DrillsTab() {
 }
 
 // PROGRESS TAB
-function ProgressTab({ workouts, games, prs, stats, badges }) {
-  const recentGames = [...games].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+function ProgressTab({ workouts, games, prs, stats, badges, saveGame }) {
+  const [view, setView] = useState('training'); // 'training' | 'games'
+  const [showLogGame, setShowLogGame] = useState(false);
+
+  const onLogGameSave = (g) => {
+    saveGame(g);
+    setShowLogGame(false);
+  };
+
+  if (showLogGame) {
+    return html`<${LogGame} onSave=${onLogGameSave} onCancel=${() => setShowLogGame(false)} />`;
+  }
+
+  return html`
+    <div class="space-y-4 fade-in">
+      <div>
+        <div class="font-mono text-xs text-flame uppercase tracking-widest">Progress</div>
+        <h2 class="font-display text-3xl text-chalk">The Grind</h2>
+      </div>
+
+      <!-- Sub-tab switcher -->
+      <div class="flex bg-courtlight rounded-xl p-1 border">
+        <button onClick=${() => setView('training')}
+          class="flex-1 py-3 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+          style=${'background:' + (view === 'training' ? 'var(--flame)' : 'transparent') +
+            ';color:' + (view === 'training' ? 'var(--courtlight)' : 'rgba(245,241,232,0.6)') +
+            ';font-weight:' + (view === 'training' ? '700' : '400')}>
+          Training
+        </button>
+        <button onClick=${() => setView('games')}
+          class="flex-1 py-3 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+          style=${'background:' + (view === 'games' ? 'var(--flame)' : 'transparent') +
+            ';color:' + (view === 'games' ? 'var(--courtlight)' : 'rgba(245,241,232,0.6)') +
+            ';font-weight:' + (view === 'games' ? '700' : '400')}>
+          Games ${games.length > 0 ? '(' + games.length + ')' : ''}
+        </button>
+      </div>
+
+      ${view === 'training'
+        ? html`<${TrainingView} workouts=${workouts} prs=${prs} stats=${stats} badges=${badges} />`
+        : html`<${GamesView} games=${games} onLogGame=${() => setShowLogGame(true)} />`}
+    </div>
+  `;
+}
+
+// TRAINING SUB-TAB
+function TrainingView({ workouts, prs, stats, badges }) {
   const last7 = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
@@ -1761,20 +1806,33 @@ function ProgressTab({ workouts, games, prs, stats, badges }) {
   const unlockedBadges = BADGES.filter(b => badges && badges[b.id]);
   const lockedBadges = BADGES.filter(b => !badges || !badges[b.id]);
 
+  // Show only PRs that have data
+  const prsWithData = [
+    { label: 'Max Push-ups', value: prs.maxPushups, unit: 'reps' },
+    { label: 'Max Pull-ups', value: prs.maxPullups, unit: 'reps' },
+    { label: 'Vertical', value: prs.vertical, unit: 'in' },
+    { label: 'Mile Time', value: prs.mileTime, unit: 'min' },
+    { label: 'Plank Hold', value: prs.plankHold, unit: 'sec' },
+    { label: 'Best FT%', value: stats.bestFtPct, unit: '%' },
+  ].filter(pr => pr.value && pr.value > 0);
+
   return html`
     <div class="space-y-4 fade-in">
-      <div>
-        <div class="font-mono text-xs text-flame uppercase tracking-widest">Progress</div>
-        <h2 class="font-display text-3xl text-chalk">The Grind</h2>
-      </div>
+      <!-- Top stats -->
       <div class="grid grid-cols-2 gap-3">
         <${StatCard} label="Streak" value=${stats.streak} suffix="days" big=${true} color="flame" />
         <${StatCard} label="Workouts" value=${stats.workoutCount} color="lime" />
-        <${StatCard} label="Games" value=${stats.gamesPlayed} color="chalk" />
-        <${StatCard} label="FTs Made" value=${stats.ftMade} color="chalk" />
       </div>
+
+      <!-- 7-day pattern -->
       <div class="bg-courtlight border rounded-2xl p-4">
-        <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider mb-3">Last 7 Days</div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-mono text-xs text-chalk-60 uppercase tracking-wider">Last 7 Days</div>
+          <div class="font-mono text-xs"
+            style=${'color:' + (trainingDaysLast7 >= 5 ? 'var(--flame)' : 'var(--lime)')}>
+            ${trainingDaysLast7}/7 trained
+          </div>
+        </div>
         <div class="flex justify-between gap-1">
           ${last7.map((d, i) => {
             const dayStyle = 'background:' + (d.completed
@@ -1792,59 +1850,27 @@ function ProgressTab({ workouts, games, prs, stats, badges }) {
             `;
           })}
         </div>
-        <div class="mt-3 font-mono text-xs text-chalk-60">
-          Training load: <span style=${'color:' + (trainingDaysLast7 >= 5 ? 'var(--flame)' : 'var(--lime)')}>${trainingDaysLast7}/7 days</span>
-        </div>
       </div>
-      <div class="bg-courtlight border rounded-2xl p-4">
-        <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Personal Bests</div>
-        <div class="grid grid-cols-2 gap-3">
-          <${PRCard} label="Max Push-ups" value=${prs.maxPushups} unit="reps" />
-          <${PRCard} label="Max Pull-ups" value=${prs.maxPullups} unit="reps" />
-          <${PRCard} label="Vertical" value=${prs.vertical} unit="in" />
-          <${PRCard} label="Mile Time" value=${prs.mileTime} unit="min" />
-          <${PRCard} label="Plank Hold" value=${prs.plankHold} unit="sec" />
-          <${PRCard} label="Best FT%" value=${stats.bestFtPct} unit="%" />
-        </div>
-      </div>
-      ${ftData.length >= 2 ? html`
+
+      <!-- Personal Bests (only show if there are any) -->
+      ${prsWithData.length > 0 ? html`
         <div class="bg-courtlight border rounded-2xl p-4">
-          <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Free Throw %</div>
-          <${MiniChart} data=${ftData.map(w => ({ x: w.date, y: w.ftPct }))} unit="%" />
-        </div>
-      ` : null}
-      ${recentGames.length > 0 ? html`
-        <div class="bg-courtlight border rounded-2xl p-4">
-          <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Recent Games</div>
-          <div class="space-y-2">
-            ${recentGames.map((g, i) => html`
-              <div key=${g.id || i} class="p-3 bg-court rounded-xl border">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="font-mono text-10 text-chalk-50 uppercase">${g.date}</div>
-                    <div class="font-display text-lg text-chalk mt-1">
-                      ${g.points} PTS · ${g.rebounds} REB · ${g.assists} AST
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <div class="font-display text-2xl text-flame">${g.feltRating}</div>
-                    <div class="font-mono text-10 text-chalk-40 uppercase">/10 felt</div>
-                  </div>
-                </div>
-                ${g.coachNotes ? html`
-                  <div class="mt-2 bg-flame-10 border-flame-30 rounded-lg p-2">
-                    <div class="font-mono text-10 text-flame uppercase tracking-wider mb-1">📋 Coach</div>
-                    <div class="text-xs text-chalk" style="opacity:0.9">${g.coachNotes}</div>
-                  </div>
-                ` : null}
-                ${g.notes ? html`
-                  <div class="mt-2 text-xs text-chalk-70" style="font-style:italic">"${g.notes}"</div>
-                ` : null}
-              </div>
-            `)}
+          <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Personal Bests</div>
+          <div class="grid grid-cols-2 gap-3">
+            ${prsWithData.map(pr => html`<${PRCard} label=${pr.label} value=${pr.value} unit=${pr.unit} />`)}
           </div>
         </div>
       ` : null}
+
+      <!-- FT trend -->
+      ${ftData.length >= 2 ? html`
+        <div class="bg-courtlight border rounded-2xl p-4">
+          <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Free Throw % Trend</div>
+          <${MiniChart} data=${ftData.map(w => ({ x: w.date, y: w.ftPct }))} unit="%" />
+        </div>
+      ` : null}
+
+      <!-- Badges preview -->
       ${unlockedBadges.length > 0 ? html`
         <div class="bg-courtlight border rounded-2xl p-4">
           <div class="flex items-center justify-between mb-3">
@@ -1873,11 +1899,231 @@ function ProgressTab({ workouts, games, prs, stats, badges }) {
           ` : null}
         </div>
       ` : null}
+
+      <!-- Empty state -->
       ${stats.workoutCount === 0 ? html`
         <div class="bg-courtlight border rounded-2xl p-6 text-center">
           <div class="text-4xl mb-2">📊</div>
-          <div class="font-display text-xl text-chalk">No data yet</div>
+          <div class="font-display text-xl text-chalk">No training yet</div>
           <div class="text-sm text-chalk-60 mt-1">Complete your first workout to see stats here.</div>
+        </div>
+      ` : null}
+    </div>
+  `;
+}
+
+// GAMES SUB-TAB
+function GamesView({ games, onLogGame }) {
+  const sortedGames = [...games].sort((a, b) => b.date.localeCompare(a.date));
+  const gameCount = games.length;
+
+  // Compute season summary
+  const summary = (() => {
+    if (gameCount === 0) return null;
+    const totals = games.reduce((acc, g) => {
+      acc.points += g.points || 0;
+      acc.rebounds += g.rebounds || 0;
+      acc.assists += g.assists || 0;
+      acc.steals += g.steals || 0;
+      acc.blocks += g.blocks || 0;
+      acc.fgMade += g.fgMade || 0;
+      acc.fgAttempts += g.fgAttempts || 0;
+      acc.threePtMade += g.threePtMade || 0;
+      acc.threePtAttempts += g.threePtAttempts || 0;
+      acc.ftMade += g.ftMade || 0;
+      acc.ftAttempts += g.ftAttempts || 0;
+      acc.minutes += g.minutes || 0;
+      if (g.result === 'W') acc.wins++;
+      if (g.result === 'L') acc.losses++;
+      return acc;
+    }, { points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0,
+         fgMade: 0, fgAttempts: 0, threePtMade: 0, threePtAttempts: 0,
+         ftMade: 0, ftAttempts: 0, minutes: 0, wins: 0, losses: 0 });
+    const ppg = totals.points / gameCount;
+    const rpg = totals.rebounds / gameCount;
+    const apg = totals.assists / gameCount;
+    const fgPct = totals.fgAttempts > 0 ? (totals.fgMade / totals.fgAttempts) * 100 : 0;
+    const threePct = totals.threePtAttempts > 0 ? (totals.threePtMade / totals.threePtAttempts) * 100 : 0;
+    const ftPct = totals.ftAttempts > 0 ? (totals.ftMade / totals.ftAttempts) * 100 : 0;
+    return { ...totals, ppg, rpg, apg, fgPct, threePct, ftPct };
+  })();
+
+  // Find best games
+  const bestScoring = gameCount > 0 ? [...games].sort((a, b) => (b.points || 0) - (a.points || 0))[0] : null;
+  const bestRebound = gameCount > 0 ? [...games].sort((a, b) => (b.rebounds || 0) - (a.rebounds || 0))[0] : null;
+  const bestAssists = gameCount > 0 ? [...games].sort((a, b) => (b.assists || 0) - (a.assists || 0))[0] : null;
+
+  // Trend data: last 10 games points and shooting %
+  const last10 = sortedGames.slice(0, 10).reverse();
+  const ppgTrend = last10.map(g => ({ x: g.date, y: g.points || 0 }));
+  const fgTrend = last10.filter(g => g.fgAttempts > 0).map(g => ({
+    x: g.date,
+    y: Math.round(((g.fgMade || 0) / g.fgAttempts) * 100)
+  }));
+
+  return html`
+    <div class="space-y-4 fade-in">
+      <!-- Always-visible Log Game button -->
+      <button onClick=${onLogGame}
+        class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl shadow-lg active:scale-95 transition flex items-center justify-center gap-2">
+        <span style="font-size:24px">+</span>
+        <span>Log a Game</span>
+      </button>
+
+      ${gameCount === 0 ? html`
+        <div class="bg-courtlight border rounded-2xl p-6 text-center">
+          <div class="text-5xl mb-2">🏀</div>
+          <div class="font-display text-2xl text-chalk">Track Your Season</div>
+          <div class="text-sm text-chalk-60 mt-2 leading-relaxed">
+            Log games as you play them. Track your points, rebounds, assists,
+            shooting percentages, and more. See trends over time.
+          </div>
+        </div>
+      ` : null}
+
+      ${gameCount > 0 ? html`
+        <!-- Season summary header -->
+        <div class="bg-courtlight border rounded-2xl p-4 flame-border">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest">Season</div>
+            ${summary.wins + summary.losses > 0 ? html`
+              <div class="font-display text-lg text-chalk">${summary.wins}W - ${summary.losses}L</div>
+            ` : null}
+          </div>
+          <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="text-center">
+              <div class="font-display text-3xl text-flame leading-none">${summary.ppg.toFixed(1)}</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">PPG</div>
+            </div>
+            <div class="text-center">
+              <div class="font-display text-3xl text-chalk leading-none">${summary.rpg.toFixed(1)}</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">RPG</div>
+            </div>
+            <div class="text-center">
+              <div class="font-display text-3xl text-chalk leading-none">${summary.apg.toFixed(1)}</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">APG</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3 pt-3 border-t" style="border-color:var(--courtbord)">
+            <div class="text-center">
+              <div class="font-display text-xl text-chalk leading-none">${summary.fgPct.toFixed(0)}%</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">FG</div>
+            </div>
+            <div class="text-center">
+              <div class="font-display text-xl text-chalk leading-none">${summary.threePct.toFixed(0)}%</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">3PT</div>
+            </div>
+            <div class="text-center">
+              <div class="font-display text-xl text-chalk leading-none">${summary.ftPct.toFixed(0)}%</div>
+              <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">FT</div>
+            </div>
+          </div>
+          <div class="mt-3 pt-3 border-t font-mono text-10 text-chalk-40 uppercase tracking-wider text-center"
+            style="border-color:var(--courtbord)">
+            ${gameCount} ${gameCount === 1 ? 'game' : 'games'} logged · ${summary.points} total pts
+          </div>
+        </div>
+
+        <!-- Best games -->
+        ${gameCount >= 2 ? html`
+          <div class="bg-courtlight border rounded-2xl p-4">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Career Highs</div>
+            <div class="space-y-2">
+              ${bestScoring && bestScoring.points > 0 ? html`
+                <div class="flex items-center justify-between p-3 bg-court rounded-xl border">
+                  <div>
+                    <div class="font-display text-2xl text-flame leading-none">${bestScoring.points} PTS</div>
+                    <div class="font-mono text-10 text-chalk-50 uppercase mt-1">${bestScoring.opponent ? 'vs ' + bestScoring.opponent + ' · ' : ''}${bestScoring.date}</div>
+                  </div>
+                  <div class="text-2xl">🔥</div>
+                </div>
+              ` : null}
+              ${bestRebound && bestRebound.rebounds > 0 ? html`
+                <div class="flex items-center justify-between p-3 bg-court rounded-xl border">
+                  <div>
+                    <div class="font-display text-2xl text-chalk leading-none">${bestRebound.rebounds} REB</div>
+                    <div class="font-mono text-10 text-chalk-50 uppercase mt-1">${bestRebound.opponent ? 'vs ' + bestRebound.opponent + ' · ' : ''}${bestRebound.date}</div>
+                  </div>
+                  <div class="text-2xl">💪</div>
+                </div>
+              ` : null}
+              ${bestAssists && bestAssists.assists > 0 ? html`
+                <div class="flex items-center justify-between p-3 bg-court rounded-xl border">
+                  <div>
+                    <div class="font-display text-2xl text-chalk leading-none">${bestAssists.assists} AST</div>
+                    <div class="font-mono text-10 text-chalk-50 uppercase mt-1">${bestAssists.opponent ? 'vs ' + bestAssists.opponent + ' · ' : ''}${bestAssists.date}</div>
+                  </div>
+                  <div class="text-2xl">🎯</div>
+                </div>
+              ` : null}
+            </div>
+          </div>
+        ` : null}
+
+        <!-- PPG trend -->
+        ${ppgTrend.length >= 3 ? html`
+          <div class="bg-courtlight border rounded-2xl p-4">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Points Per Game</div>
+            <${MiniChart} data=${ppgTrend} unit="pts" />
+            <div class="mt-2 font-mono text-10 text-chalk-50 uppercase tracking-wider">
+              Last ${ppgTrend.length} games
+            </div>
+          </div>
+        ` : null}
+
+        <!-- FG% trend -->
+        ${fgTrend.length >= 3 ? html`
+          <div class="bg-courtlight border rounded-2xl p-4">
+            <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">Field Goal %</div>
+            <${MiniChart} data=${fgTrend} unit="%" />
+            <div class="mt-2 font-mono text-10 text-chalk-50 uppercase tracking-wider">
+              Last ${fgTrend.length} games
+            </div>
+          </div>
+        ` : null}
+
+        <!-- All games list -->
+        <div class="bg-courtlight border rounded-2xl p-4">
+          <div class="font-mono text-xs text-flame uppercase tracking-widest mb-3">All Games</div>
+          <div class="space-y-2">
+            ${sortedGames.map((g, i) => html`
+              <div key=${g.id || i} class="p-3 bg-court rounded-xl border">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    ${g.result === 'W' ? html`<span class="font-mono text-xs px-2 py-0.5 rounded" style="background:rgba(180,255,58,0.2);color:var(--lime)">W</span>` : null}
+                    ${g.result === 'L' ? html`<span class="font-mono text-xs px-2 py-0.5 rounded" style="background:rgba(255,107,26,0.2);color:var(--flame)">L</span>` : null}
+                    ${g.opponent ? html`<span class="font-mono text-xs text-chalk">vs ${g.opponent}</span>` : null}
+                    <span class="font-mono text-10 text-chalk-50 uppercase">${g.date}</span>
+                  </div>
+                  ${g.feltRating ? html`
+                    <div class="text-right">
+                      <span class="font-display text-lg text-flame">${g.feltRating}</span>
+                      <span class="font-mono text-10 text-chalk-40 uppercase">/10</span>
+                    </div>
+                  ` : null}
+                </div>
+                <div class="font-display text-xl text-chalk leading-tight">
+                  ${g.points || 0} PTS · ${g.rebounds || 0} REB · ${g.assists || 0} AST
+                </div>
+                ${(g.fgMade > 0 || g.threePtMade > 0 || g.ftMade > 0) ? html`
+                  <div class="font-mono text-10 text-chalk-50 uppercase tracking-wider mt-1">
+                    ${g.fgAttempts > 0 ? 'FG ' + g.fgMade + '/' + g.fgAttempts : ''}
+                    ${g.threePtAttempts > 0 ? ' · 3PT ' + g.threePtMade + '/' + g.threePtAttempts : ''}
+                    ${g.ftAttempts > 0 ? ' · FT ' + g.ftMade + '/' + g.ftAttempts : ''}
+                  </div>
+                ` : null}
+                ${g.coachNotes ? html`
+                  <div class="mt-2 bg-flame-10 border-flame-30 rounded-lg p-2">
+                    <div class="font-mono text-10 text-flame uppercase tracking-wider mb-1">📋 Coach</div>
+                    <div class="text-xs text-chalk" style="opacity:0.9">${g.coachNotes}</div>
+                  </div>
+                ` : null}
+                ${g.notes ? html`
+                  <div class="mt-2 text-xs text-chalk-70" style="font-style:italic">"${g.notes}"</div>
+                ` : null}
+              </div>
+            `)}
+          </div>
         </div>
       ` : null}
     </div>
@@ -2741,7 +2987,7 @@ function App() {
           ${tab === 'today' ? html`<${TodayTab} workouts=${workouts} checkins=${checkins} prs=${prs}
             saveWorkout=${saveWorkout} saveCheckin=${saveCheckin} savePRs=${savePRs} saveGame=${saveGame} />` : null}
           ${tab === 'drills' ? html`<${DrillsTab} />` : null}
-          ${tab === 'progress' ? html`<${ProgressTab} workouts=${workouts} games=${games} prs=${prs} stats=${stats} badges=${badges} />` : null}
+          ${tab === 'progress' ? html`<${ProgressTab} workouts=${workouts} games=${games} prs=${prs} stats=${stats} badges=${badges} saveGame=${saveGame} />` : null}
           ${tab === 'badges' ? html`<${BadgesTab} unlocked=${badges} /> ` : null}
           ${tab === 'settings' ? html`<${SettingsTab} settings=${settings} onSave=${onSaveSettings} workouts=${workouts} games=${games}
             profile=${current} profiles=${profiles}
