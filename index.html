@@ -871,6 +871,33 @@ function MiniChart({ data, unit }) {
 }
 
 // CHECK-IN
+function GameToggle({ label, value, onChange }) {
+  // Single toggle pill: clearly shows yes/no state. Big tap targets.
+  return html`
+    <div class="space-y-2">
+      <div class="text-sm text-chalk">${label}</div>
+      <div class="flex bg-court rounded-xl p-1" style="border:1px solid var(--courtbord)">
+        <button
+          onClick=${() => onChange(false)}
+          class="flex-1 py-3 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+          style=${'background:' + (value === false ? 'var(--courtbord)' : 'transparent') +
+            ';color:' + (value === false ? 'var(--chalk)' : 'rgba(245,241,232,0.4)') +
+            ';font-weight:' + (value === false ? '700' : '400')}>
+          No
+        </button>
+        <button
+          onClick=${() => onChange(true)}
+          class="flex-1 py-3 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+          style=${'background:' + (value === true ? 'var(--flame)' : 'transparent') +
+            ';color:' + (value === true ? 'var(--courtlight)' : 'rgba(245,241,232,0.4)') +
+            ';font-weight:' + (value === true ? '700' : '400')}>
+          Yes
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function CheckIn({ existing, onSave, onSkip }) {
   const [sleep, setSleep] = useState((existing && existing.sleepHours) || 8);
   const [soreness, setSoreness] = useState((existing && existing.soreness) || 3);
@@ -933,39 +960,15 @@ function CheckIn({ existing, onSave, onSkip }) {
         </div>
       </div>
 
-      <div class="bg-courtlight border rounded-xl p-4 space-y-3" style="border-color:rgba(255,107,26,0.3)">
-        <div class="font-mono text-xs text-flame uppercase tracking-wider">🏀 Game Schedule</div>
-        <div class="text-xs text-chalk-60">Lets us adjust today's training so your legs are fresh for games.</div>
-
-        <div class="flex items-center justify-between">
-          <span class="text-sm text-chalk">Got a game today?</span>
-          <div class="flex gap-2">
-            <button onClick=${() => setGameToday(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (gameToday ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (gameToday ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
-            <button onClick=${() => setGameToday(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (!gameToday ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!gameToday ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
-          </div>
+      <div class="bg-courtlight border rounded-xl p-4 space-y-4" style="border-color:rgba(255,107,26,0.3)">
+        <div>
+          <div class="font-mono text-xs text-flame uppercase tracking-wider">🏀 Game Schedule</div>
+          <div class="text-xs text-chalk-60 mt-1">Lets us adjust today's training so your legs are fresh for games.</div>
         </div>
 
-        <div class="flex items-center justify-between">
-          <span class="text-sm text-chalk">Game tomorrow?</span>
-          <div class="flex gap-2">
-            <button onClick=${() => setGameTomorrow(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (gameTomorrow ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (gameTomorrow ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
-            <button onClick=${() => setGameTomorrow(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (!gameTomorrow ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!gameTomorrow ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <span class="text-sm text-chalk">Played yesterday?</span>
-          <div class="flex gap-2">
-            <button onClick=${() => setPlayedYesterday(true)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (playedYesterday ? 'var(--flame)' : 'var(--courtbord)') + ';color:' + (playedYesterday ? 'var(--courtlight)' : 'rgba(245,241,232,0.7)')}>Yes</button>
-            <button onClick=${() => setPlayedYesterday(false)} class="px-4 py-2 rounded-lg font-mono text-xs uppercase"
-              style=${'background:' + (!playedYesterday ? 'var(--court)' : 'var(--courtbord)') + ';color:' + (!playedYesterday ? 'var(--chalk)' : 'rgba(245,241,232,0.7)') + ';border:1px solid var(--courtbord)'}>No</button>
-          </div>
-        </div>
+        <${GameToggle} label="Got a game today?" value=${gameToday} onChange=${setGameToday} />
+        <${GameToggle} label="Game tomorrow?" value=${gameTomorrow} onChange=${setGameTomorrow} />
+        <${GameToggle} label="Played yesterday?" value=${playedYesterday} onChange=${setPlayedYesterday} />
       </div>
 
       <button onClick=${submit} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Save Check-In</button>
