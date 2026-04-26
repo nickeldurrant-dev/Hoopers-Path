@@ -2770,14 +2770,22 @@ function App() {
               })));
             }
             if (d.games.length) {
-              await Promise.all(d.games.map(g => new Promise((res, rej) => {
-                const tx = db.transaction('games', 'readwrite');
-                const { id, ...rest } = g;
-                const payload = { ...rest, profile: pid };
-                const req = tx.objectStore('games').add(payload);
-                req.onsuccess = () => res();
-                req.onerror = () => rej(req.error);
-              })));
+              // FIX: dedupe games before adding. Games from cloud may already be in local IDB
+              // because hydrate runs every sign-in. Use content fingerprint to detect duplicates.
+              const localGames = await idbGetAll('games');
+              const fingerprint = (g) => [g.date, g.opponent || '', g.points || 0, g.rebounds || 0, g.assists || 0].join('|');
+              const localFingerprints = new Set(localGames.map(fingerprint));
+              const newGames = d.games.filter(g => !localFingerprints.has(fingerprint(g)));
+              if (newGames.length > 0) {
+                await Promise.all(newGames.map(g => new Promise((res, rej) => {
+                  const tx = db.transaction('games', 'readwrite');
+                  const { id, ...rest } = g;
+                  const payload = { ...rest, profile: pid };
+                  const req = tx.objectStore('games').add(payload);
+                  req.onsuccess = () => res();
+                  req.onerror = () => rej(req.error);
+                })));
+              }
             }
             // Reload local state
             const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
@@ -2814,6 +2822,40 @@ function App() {
     setLoading(true);
     (async () => {
       try {
+        // ONE-TIME CLEANUP: dedupe games that got duplicated by an old hydrate bug.
+        // Runs once per profile, then sets a flag and never runs again.
+        const dedupeFlagKey = 'gameDedupeDone::' + activeId;
+        if (!localStorage.getItem(dedupeFlagKey)) {
+          try {
+            const allGames = await idbGetAll('games');
+            const fingerprint = (g) => [g.date, g.opponent || '', g.points || 0, g.rebounds || 0, g.assists || 0].join('|');
+            const seen = new Map();  // fingerprint -> first game (kept)
+            const toDelete = [];
+            for (const g of allGames) {
+              const fp = fingerprint(g);
+              if (seen.has(fp)) {
+                // Duplicate — mark for deletion (keep the one we saw first, which has lower id)
+                toDelete.push(g.id);
+              } else {
+                seen.set(fp, g);
+              }
+            }
+            if (toDelete.length > 0) {
+              const db = await openDB();
+              await Promise.all(toDelete.map(id => new Promise((res, rej) => {
+                const tx = db.transaction('games', 'readwrite');
+                const req = tx.objectStore('games').delete(id);
+                req.onsuccess = () => res();
+                req.onerror = () => rej(req.error);
+              })));
+              console.log('Deduped', toDelete.length, 'duplicate games');
+            }
+            localStorage.setItem(dedupeFlagKey, '1');
+          } catch (cleanupErr) {
+            console.warn('Dedupe cleanup failed (non-fatal):', cleanupErr);
+          }
+        }
+
         const [w, g, c] = await Promise.all([idbGetAll('workouts'), idbGetAll('games'), idbGetAll('checkins')]);
         setWorkouts(w || []);
         setGames(g || []);
