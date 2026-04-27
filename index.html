@@ -3020,15 +3020,58 @@ function VoiceSection() {
     `;
   }
 
-  // Sort: enhanced/premium first, then en-US, then others
-  const scoreVoice = (v) => {
-    let score = 0;
-    if (/enhanced|premium|natural/i.test(v.name)) score += 100;
-    if (v.lang === 'en-US') score += 10;
-    if (v.localService) score += 5;
-    return score;
+  // Allowlist of known-quality English voices. Anything else gets filtered out
+  // (this drops iOS/macOS novelty voices like Bahh, Bubbles, Cellos, Trinoids, Zarvox, etc.)
+  const QUALITY_VOICES = [
+    'Samantha', 'Karen', 'Daniel', 'Moira', 'Tessa',
+    'Aaron', 'Allison', 'Ava', 'Fred', 'Susan',
+    'Tom', 'Victoria', 'Nicky', 'Joelle', 'Evan',
+    'Rishi', 'Veena',
+    // Google voices that may show on Android/Chrome
+    'Google US English', 'Google UK English Female', 'Google UK English Male',
+    // Microsoft voices
+    'Microsoft Aria', 'Microsoft Jenny', 'Microsoft Guy', 'Microsoft Ana',
+  ];
+
+  const isQualityVoice = (v) => {
+    return QUALITY_VOICES.some(q => v.name.startsWith(q) || v.name.includes(q));
   };
-  const sortedVoices = [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+
+  // Filter to good voices, then dedupe — prefer Enhanced/Premium over base versions
+  const filteredVoices = voices.filter(isQualityVoice);
+  const deduped = [];
+  const baseNamesSeen = new Set();
+  // First pass: add all enhanced/premium voices and remember their base names
+  for (const v of filteredVoices) {
+    if (/enhanced|premium|natural/i.test(v.name)) {
+      // Extract the base name (e.g. "Samantha" from "Samantha (Enhanced)")
+      const baseName = v.name.replace(/\s*\((Enhanced|Premium|Natural)\)\s*/gi, '').trim();
+      if (!baseNamesSeen.has(baseName + '|' + v.lang)) {
+        deduped.push(v);
+        baseNamesSeen.add(baseName + '|' + v.lang);
+      }
+    }
+  }
+  // Second pass: add base voices only if no enhanced version exists for that name+lang
+  for (const v of filteredVoices) {
+    if (!/enhanced|premium|natural/i.test(v.name)) {
+      const key = v.name + '|' + v.lang;
+      if (!baseNamesSeen.has(key)) {
+        deduped.push(v);
+        baseNamesSeen.add(key);
+      }
+    }
+  }
+
+  // Sort: enhanced first, then en-US over en-GB, then alphabetical
+  const sortedVoices = deduped.sort((a, b) => {
+    const aEnh = /enhanced|premium|natural/i.test(a.name) ? 1 : 0;
+    const bEnh = /enhanced|premium|natural/i.test(b.name) ? 1 : 0;
+    if (aEnh !== bEnh) return bEnh - aEnh;
+    if (a.lang === 'en-US' && b.lang !== 'en-US') return -1;
+    if (b.lang === 'en-US' && a.lang !== 'en-US') return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const handleSelect = (v) => {
     setSelected(v.name);
@@ -3051,6 +3094,8 @@ function VoiceSection() {
 
       ${voices.length === 0 ? html`
         <div class="text-sm text-chalk-60 italic">No voices loaded yet. Try refreshing the page.</div>
+      ` : sortedVoices.length === 0 ? html`
+        <div class="text-sm text-chalk-60 italic">No quality voices found on this device. Try downloading Enhanced voices in iPhone Settings.</div>
       ` : html`
         <div class="space-y-2 max-h-80 overflow-y-auto">
           ${sortedVoices.map(v => {
