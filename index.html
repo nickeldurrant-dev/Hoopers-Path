@@ -2734,6 +2734,20 @@ function App() {
     setHydrating(true);
     (async () => {
       try {
+        // ONE-TIME CLOUD DEDUPE — fixes the broken-sync legacy where games duplicated in cloud
+        const cloudDedupeFlag = 'cloudGameDedupe::' + authSession.user.uid;
+        if (!localStorage.getItem(cloudDedupeFlag)) {
+          try {
+            const result = await window.HOOPERS_SYNC.dedupeCloudGames();
+            if (result.ok && result.deleted > 0) {
+              console.log('Removed', result.deleted, 'duplicate games from cloud');
+            }
+            localStorage.setItem(cloudDedupeFlag, '1');
+          } catch (e) {
+            console.warn('Cloud dedupe skipped:', e);
+          }
+        }
+
         const result = await window.HOOPERS_SYNC.hydrateFromCloud();
         if (result.ok && result.data) {
           const d = result.data;
@@ -2770,12 +2784,21 @@ function App() {
               })));
             }
             if (d.games.length) {
-              // FIX: dedupe games before adding. Games from cloud may already be in local IDB
-              // because hydrate runs every sign-in. Use content fingerprint to detect duplicates.
+              // Dedupe in two ways:
+              // (1) Skip cloud games already in local (by fingerprint)
+              // (2) Skip within-cloud duplicates too (cloud may have duplicate documents
+              //     from old broken sync code)
               const localGames = await idbGetAll('games');
               const fingerprint = (g) => [g.date, g.opponent || '', g.points || 0, g.rebounds || 0, g.assists || 0].join('|');
-              const localFingerprints = new Set(localGames.map(fingerprint));
-              const newGames = d.games.filter(g => !localFingerprints.has(fingerprint(g)));
+              const seenFingerprints = new Set(localGames.map(fingerprint));
+              const newGames = [];
+              for (const g of d.games) {
+                const fp = fingerprint(g);
+                if (!seenFingerprints.has(fp)) {
+                  seenFingerprints.add(fp);  // also prevents within-cloud duplicates
+                  newGames.push(g);
+                }
+              }
               if (newGames.length > 0) {
                 await Promise.all(newGames.map(g => new Promise((res, rej) => {
                   const tx = db.transaction('games', 'readwrite');
@@ -2824,7 +2847,8 @@ function App() {
       try {
         // ONE-TIME CLEANUP: dedupe games that got duplicated by an old hydrate bug.
         // Runs once per profile, then sets a flag and never runs again.
-        const dedupeFlagKey = 'gameDedupeDone::' + activeId;
+        // Flag name bumped to 'v2' to force re-run for users who hit v17's incomplete fix.
+        const dedupeFlagKey = 'gameDedupeDone::v2::' + activeId;
         if (!localStorage.getItem(dedupeFlagKey)) {
           try {
             const allGames = await idbGetAll('games');

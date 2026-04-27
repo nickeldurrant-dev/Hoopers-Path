@@ -4,7 +4,7 @@
 // for cross-device), falling back to local if cloud is empty.
 
 import {
-  doc, getDoc, setDoc, collection, getDocs, addDoc, query, where, writeBatch, serverTimestamp
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, addDoc, query, where, writeBatch, serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const db = window.HOOPERS_AUTH && window.HOOPERS_AUTH._db;
@@ -285,6 +285,43 @@ async function getMyTeams() {
   }
 }
 
+// =============================================================
+// CLOUD CLEANUP — one-time dedupe of duplicate game documents in Firestore
+// Runs once per user (tracked via localStorage flag).
+// =============================================================
+async function dedupeCloudGames() {
+  const uid = getUid();
+  if (!uid || !db) return { ok: false, reason: 'not-signed-in' };
+
+  try {
+    const snap = await getDocs(collection(db, `users/${uid}/games`));
+    const games = snap.docs.map(d => ({ docId: d.id, ...d.data() }));
+    const fingerprint = (g) => [g.date, g.opponent || '', g.points || 0, g.rebounds || 0, g.assists || 0].join('|');
+
+    const seen = new Map();  // fp -> first docId (kept)
+    const toDelete = [];
+    for (const g of games) {
+      const fp = fingerprint(g);
+      if (seen.has(fp)) {
+        toDelete.push(g.docId);
+      } else {
+        seen.set(fp, g.docId);
+      }
+    }
+
+    if (toDelete.length === 0) return { ok: true, deleted: 0 };
+
+    // Delete in batches to avoid Firestore limits
+    for (const docId of toDelete) {
+      await deleteDoc(doc(db, `users/${uid}/games/${docId}`));
+    }
+    return { ok: true, deleted: toDelete.length };
+  } catch (err) {
+    console.error('Cloud dedupe error:', err);
+    return { ok: false, reason: err.message || String(err) };
+  }
+}
+
 window.HOOPERS_SYNC = {
   hydrateFromCloud,
   pushLocalToCloud,
@@ -299,6 +336,7 @@ window.HOOPERS_SYNC = {
   createTeam,
   joinTeamByCode,
   getMyTeams,
+  dedupeCloudGames,
 };
 
 window.HOOPERS_SYNC_READY = true;
