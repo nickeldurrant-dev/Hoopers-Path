@@ -523,10 +523,11 @@ function generateWorkout(day, fatigueMod, env, gameContext) {
   let template = WEEKLY_TEMPLATE[day];
   if (!template) return null;
 
-  // If today's template is "gameday" but user check-in says NO game today,
+  // If today's template is "gameday" but user didn't explicitly say yes to game today,
   // swap to a normal training template (Thursday is full-body skills, good general default).
   // This handles weekends where the kid isn't actually playing.
-  if (template.type === 'gameday' && gameContext && gameContext.gameToday === false) {
+  // Players opt INTO gameday mode via check-in, never default into it.
+  if (template.type === 'gameday' && !(gameContext && gameContext.gameToday === true)) {
     template = WEEKLY_TEMPLATE.thursday || WEEKLY_TEMPLATE.tuesday || template;
   }
 
@@ -1994,12 +1995,9 @@ function TodayTab({ workouts, checkins, prs, saveWorkout, saveCheckin, savePRs, 
   }, []);
 
   const template = WEEKLY_TEMPLATE[day];
-  // Game day determination, in priority order:
-  // 1. If user did check-in and answered game-today question → use that
-  // 2. Otherwise → fall back to weekly template default (weekend = game)
-  const isGameDay = todayCheckin && typeof todayCheckin.gameToday !== 'undefined'
-    ? !!todayCheckin.gameToday
-    : template.type === 'gameday';
+  // Game day only when user EXPLICITLY says yes in their check-in.
+  // No more weekend-default game day. Players control this via check-in.
+  const isGameDay = todayCheckin ? !!todayCheckin.gameToday : false;
 
   if (view === 'checkin') {
     return html`<${CheckIn} existing=${todayCheckin}
