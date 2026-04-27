@@ -1813,6 +1813,10 @@ function GameDayView({ onLogGame, onExit }) {
 
 // LOG GAME
 function LogGame({ onSave, onCancel }) {
+  const [date, setDate] = useState(todayStr());
+  const [opponent, setOpponent] = useState('');
+  const [tournament, setTournament] = useState('');
+  const [result, setResult] = useState(''); // '', 'W', 'L'
   const [points, setPoints] = useState('');
   const [rebounds, setRebounds] = useState('');
   const [assists, setAssists] = useState('');
@@ -1822,12 +1826,40 @@ function LogGame({ onSave, onCancel }) {
   const [coachNotes, setCoachNotes] = useState('');
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryDone, setRecoveryDone] = useState({});
+  const [dateError, setDateError] = useState(null);
+
+  const isValidDate = (d) => {
+    if (!d) return false;
+    // YYYY-MM-DD format check
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d).getTime());
+  };
+
+  const tryAdvance = () => {
+    if (!isValidDate(date)) {
+      setDateError('Game date is required.');
+      return;
+    }
+    setDateError(null);
+    setShowRecovery(true);
+  };
 
   const submit = () => {
-    onSave({ date: todayStr(),
-      points: parseInt(points) || 0, rebounds: parseInt(rebounds) || 0,
-      assists: parseInt(assists) || 0, minutes: parseInt(minutes) || 0,
-      feltRating, notes, coachNotes });
+    if (!isValidDate(date)) {
+      setDateError('Game date is required.');
+      setShowRecovery(false);
+      return;
+    }
+    onSave({
+      date,
+      opponent: opponent.trim(),
+      tournament: tournament.trim(),
+      result: result || null,
+      points: parseInt(points) || 0,
+      rebounds: parseInt(rebounds) || 0,
+      assists: parseInt(assists) || 0,
+      minutes: parseInt(minutes) || 0,
+      feltRating, notes, coachNotes,
+    });
   };
 
   if (showRecovery) {
@@ -1868,6 +1900,60 @@ function LogGame({ onSave, onCancel }) {
         <div class="font-mono text-xs text-flame uppercase tracking-widest">Post-Game</div>
         <h2 class="font-display text-3xl text-chalk">Log Your Game</h2>
       </div>
+
+      <!-- Game Info Section -->
+      <div class="bg-courtlight border rounded-2xl p-4 space-y-3">
+        <div class="font-mono text-xs text-flame uppercase tracking-widest">Game Info</div>
+
+        <div>
+          <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">
+            Date <span style="color:var(--flame)">*</span>
+          </div>
+          <input type="date" value=${date}
+            onInput=${e => { setDate(e.target.value); setDateError(null); }}
+            class="w-full bg-court border rounded-xl p-3 text-chalk"
+            style=${'border-color:' + (dateError ? 'var(--flame)' : 'var(--courtbord)')} />
+          ${dateError ? html`<div class="text-xs text-flame font-mono mt-1">${dateError}</div>` : null}
+        </div>
+
+        <div>
+          <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Opponent</div>
+          <input type="text" value=${opponent} onInput=${e => setOpponent(e.target.value)}
+            placeholder="e.g. Eagles, Lincoln HS"
+            maxlength="40"
+            class="w-full bg-court border rounded-xl p-3 text-chalk" />
+        </div>
+
+        <div>
+          <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-1">Tournament / League</div>
+          <input type="text" value=${tournament} onInput=${e => setTournament(e.target.value)}
+            placeholder="Optional · e.g. AAU State, District Final"
+            maxlength="50"
+            class="w-full bg-court border rounded-xl p-3 text-chalk" />
+        </div>
+
+        <div>
+          <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mb-2">Result</div>
+          <div class="flex bg-court rounded-xl p-1" style="border:1px solid var(--courtbord)">
+            <button onClick=${() => setResult(result === 'W' ? '' : 'W')}
+              class="flex-1 py-2 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+              style=${'background:' + (result === 'W' ? 'rgba(180,255,58,0.2)' : 'transparent') +
+                ';color:' + (result === 'W' ? 'var(--lime)' : 'rgba(245,241,232,0.5)') +
+                ';font-weight:' + (result === 'W' ? '700' : '400')}>
+              W — Win
+            </button>
+            <button onClick=${() => setResult(result === 'L' ? '' : 'L')}
+              class="flex-1 py-2 rounded-lg font-mono text-xs uppercase tracking-wider transition"
+              style=${'background:' + (result === 'L' ? 'rgba(255,107,26,0.2)' : 'transparent') +
+                ';color:' + (result === 'L' ? 'var(--flame)' : 'rgba(245,241,232,0.5)') +
+                ';font-weight:' + (result === 'L' ? '700' : '400')}>
+              L — Loss
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Section -->
       <div class="grid grid-cols-2 gap-3">
         <${StatInput} label="Points" value=${points} setValue=${setPoints} />
         <${StatInput} label="Rebounds" value=${rebounds} setValue=${setRebounds} />
@@ -1894,7 +1980,7 @@ function LogGame({ onSave, onCancel }) {
           style="min-height:70px;resize:vertical;border-color:rgba(255,107,26,0.3)"></textarea>
         <div class="text-xs text-chalk-50 mt-1">Log what coach told you — you'll see it in Stats so you know what to work on.</div>
       </div>
-      <button onClick=${() => setShowRecovery(true)} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Next: Recovery →</button>
+      <button onClick=${tryAdvance} class="w-full bg-flame text-courtlight font-display text-2xl py-4 rounded-2xl">Next: Recovery →</button>
     </div>
   `;
 }
@@ -2443,19 +2529,24 @@ function GamesView({ games, onLogGame }) {
             ${sortedGames.map((g, i) => html`
               <div key=${g.id || i} class="p-3 bg-court rounded-xl border">
                 <div class="flex items-center justify-between mb-1">
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
                     ${g.result === 'W' ? html`<span class="font-mono text-xs px-2 py-0.5 rounded" style="background:rgba(180,255,58,0.2);color:var(--lime)">W</span>` : null}
                     ${g.result === 'L' ? html`<span class="font-mono text-xs px-2 py-0.5 rounded" style="background:rgba(255,107,26,0.2);color:var(--flame)">L</span>` : null}
                     ${g.opponent ? html`<span class="font-mono text-xs text-chalk">vs ${g.opponent}</span>` : null}
                     <span class="font-mono text-10 text-chalk-50 uppercase">${g.date}</span>
                   </div>
                   ${g.feltRating ? html`
-                    <div class="text-right">
+                    <div class="text-right shrink-0">
                       <span class="font-display text-lg text-flame">${g.feltRating}</span>
                       <span class="font-mono text-10 text-chalk-40 uppercase">/10</span>
                     </div>
                   ` : null}
                 </div>
+                ${g.tournament ? html`
+                  <div class="font-mono text-10 text-flame uppercase tracking-wider mb-1" style="opacity:0.85">
+                    🏆 ${g.tournament}
+                  </div>
+                ` : null}
                 <div class="font-display text-xl text-chalk leading-tight">
                   ${g.points || 0} PTS · ${g.rebounds || 0} REB · ${g.assists || 0} AST
                 </div>
