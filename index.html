@@ -301,7 +301,7 @@ function showErr(stage, err) {
   }
 }
 
-let h, render, useState, useEffect, useMemo, htm;
+let h, render, useState, useEffect, useMemo, useRef, htm;
 try {
   const preactMod = await import('https://esm.sh/preact@10.19.3');
   h = preactMod.h; render = preactMod.render;
@@ -310,6 +310,7 @@ try {
 try {
   const hooksMod = await import('https://esm.sh/preact@10.19.3/hooks');
   useState = hooksMod.useState; useEffect = hooksMod.useEffect; useMemo = hooksMod.useMemo;
+  useRef = hooksMod.useRef;
 } catch (e) { showErr('import preact/hooks', e); throw e; }
 
 try {
@@ -1291,6 +1292,301 @@ function ProfilePicker({ profiles, onPick, onAdd, onDelete, onCancel, allowCance
   `;
 }
 
+// SPEECH ENGINE — wraps Web Speech API with sensible defaults and queuing
+const speechEngine = (() => {
+  let voice = null;
+  let initialized = false;
+
+  function init() {
+    if (initialized || !('speechSynthesis' in window)) return;
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      // Prefer en-US, male, "natural" voices on iOS
+      voice = voices.find(v => v.lang === 'en-US' && /Samantha|Daniel|Alex/i.test(v.name)) ||
+              voices.find(v => v.lang === 'en-US' && v.localService) ||
+              voices.find(v => v.lang.startsWith('en')) ||
+              voices[0];
+      initialized = !!voice;
+    };
+    pickVoice();
+    if (!initialized) {
+      // Voices may load asynchronously
+      window.speechSynthesis.onvoiceschanged = pickVoice;
+    }
+  }
+
+  function speak(text, opts) {
+    if (!('speechSynthesis' in window)) return;
+    if (!initialized) init();
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) u.voice = voice;
+    u.rate = (opts && opts.rate) || 1.0;
+    u.pitch = (opts && opts.pitch) || 1.0;
+    u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  }
+
+  function stop() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  }
+
+  function isSupported() {
+    return 'speechSynthesis' in window;
+  }
+
+  return { speak, stop, init, isSupported };
+})();
+
+// COACH MODE — hands-free workout flow with voice coaching
+function CoachMode({ workout, env, onComplete, onExit, onPRUpdate, prs }) {
+  // Flatten all drills with their section context
+  const flatDrills = useMemo(() => {
+    const list = [];
+    workout.sections.forEach((section, sectionIdx) => {
+      section.drills.forEach((drill, drillIdx) => {
+        list.push({
+          ...drill,
+          sectionLabel: section.label,
+          sectionIdx,
+          drillIdx,
+          isFirstInSection: drillIdx === 0,
+        });
+      });
+    });
+    return list;
+  }, [workout]);
+
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [phase, setPhase] = useState('drill'); // 'drill' | 'rest'
+  const [timeLeft, setTimeLeft] = useState(0); // seconds
+  const [paused, setPaused] = useState(false);
+  const [completed, setCompleted] = useState({});
+  const announcedRef = useRef(new Set()); // tracks which announcements have fired
+  const speechReadyRef = useRef(false);
+
+  const current = flatDrills[currentIdx];
+  const next = flatDrills[currentIdx + 1];
+  const isLast = currentIdx >= flatDrills.length - 1;
+  const totalDrills = flatDrills.length;
+
+  // Default durations
+  const drillDuration = (drill) => {
+    if (drill.timer) return drill.timer; // explicit timer (e.g. plank)
+    if (drill.reps) return 45; // typical strength set
+    return 60; // default 1 min for skill drills
+  };
+  const restDuration = (drill) => {
+    if (drill.category === 'lower' || drill.category === 'plyo') return 60; // longer rest after legs
+    if (drill.category === 'upper') return 45;
+    if (drill.category === 'shooting' || drill.category === 'finishing') return 20; // short rest, more reps
+    return 30;
+  };
+
+  // Initialize speech on mount
+  useEffect(() => {
+    speechEngine.init();
+    speechReadyRef.current = true;
+    return () => speechEngine.stop();
+  }, []);
+
+  // When entering a new drill, set timer and announce
+  useEffect(() => {
+    if (paused || !current) return;
+    if (phase === 'drill') {
+      setTimeLeft(drillDuration(current));
+      // Announce drill (but only once per drill)
+      const announceKey = 'drill-' + currentIdx;
+      if (!announcedRef.current.has(announceKey)) {
+        announcedRef.current.add(announceKey);
+        const repsText = current.reps ? ', ' + current.reps + ' reps' :
+                         current.sets ? ', ' + current.sets + ' sets' : '';
+        const cue = current.cue || (current.howTo ? current.howTo.split('.')[0] : '');
+        const intro = current.isFirstInSection ? current.sectionLabel + '. ' : '';
+        speechEngine.speak(intro + current.name + repsText + '. ' + (cue || ''));
+      }
+    } else if (phase === 'rest') {
+      setTimeLeft(restDuration(current));
+      const announceKey = 'rest-' + currentIdx;
+      if (!announcedRef.current.has(announceKey)) {
+        announcedRef.current.add(announceKey);
+        const nextText = next ? '. Next up: ' + next.name : '';
+        speechEngine.speak('Rest' + nextText);
+      }
+    }
+  }, [currentIdx, phase, paused]);
+
+  // Tick timer down
+  useEffect(() => {
+    if (paused || timeLeft <= 0) return;
+    const t = setTimeout(() => {
+      setTimeLeft(s => {
+        const next = s - 1;
+        // Halfway encouragement on long drills
+        if (phase === 'drill' && next === Math.floor(drillDuration(current) / 2) && drillDuration(current) >= 40) {
+          speechEngine.speak(['Halfway there', 'Keep going', 'Stay strong'][Math.floor(Math.random() * 3)]);
+        }
+        // Final countdown
+        if (next === 10) speechEngine.speak('Ten seconds');
+        if (phase === 'rest' && next === 5) speechEngine.speak('Get ready');
+        return next;
+      });
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [timeLeft, paused, phase]);
+
+  // When timer hits zero, advance
+  useEffect(() => {
+    if (paused || timeLeft > 0) return;
+    if (phase === 'drill') {
+      // Mark complete, go to rest
+      setCompleted(c => ({ ...c, [current.id]: true }));
+      if (isLast) {
+        // Skip rest after last drill
+        speechEngine.speak('Workout complete. Great work!');
+        setTimeout(() => onComplete(completed), 2500);
+      } else {
+        setPhase('rest');
+      }
+    } else if (phase === 'rest') {
+      setCurrentIdx(i => i + 1);
+      setPhase('drill');
+    }
+  }, [timeLeft, paused, phase]);
+
+  const skipForward = () => {
+    speechEngine.stop();
+    if (phase === 'drill') {
+      setCompleted(c => ({ ...c, [current.id]: true }));
+      if (isLast) {
+        speechEngine.speak('Workout complete. Great work!');
+        setTimeout(() => onComplete({ ...completed, [current.id]: true }), 2000);
+      } else {
+        setPhase('rest');
+      }
+    } else {
+      setCurrentIdx(i => i + 1);
+      setPhase('drill');
+    }
+  };
+
+  const skipDrillEntirely = () => {
+    speechEngine.stop();
+    if (isLast) {
+      onComplete(completed);
+    } else {
+      setCurrentIdx(i => i + 1);
+      setPhase('drill');
+    }
+  };
+
+  const togglePause = () => {
+    if (!paused) {
+      speechEngine.stop();
+      setPaused(true);
+    } else {
+      setPaused(false);
+      speechEngine.speak('Resume.');
+    }
+  };
+
+  if (!current) {
+    return html`
+      <div class="min-h-screen flex items-center justify-center">
+        <div class="font-display text-flame text-3xl">Workout Complete!</div>
+      </div>
+    `;
+  }
+
+  // Big timer display
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
+  const timeStr = minutes > 0 ? minutes + ':' + (seconds < 10 ? '0' : '') + seconds : seconds + 's';
+
+  const phaseColor = phase === 'drill' ? 'var(--flame)' : 'var(--lime)';
+  const phaseLabel = phase === 'drill' ? 'TRAINING' : 'REST';
+  const totalDur = phase === 'drill' ? drillDuration(current) : restDuration(current);
+  const progressPct = totalDur > 0 ? ((totalDur - timeLeft) / totalDur) * 100 : 0;
+
+  return html`
+    <div class="min-h-screen flex flex-col" style="background:var(--court)">
+      <!-- Top bar -->
+      <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid var(--courtbord)">
+        <button onClick=${onExit} class="font-mono text-xs text-chalk-60 uppercase tracking-wider px-3 py-2">
+          ✕ Exit
+        </button>
+        <div class="font-mono text-xs text-chalk-50 uppercase tracking-wider">
+          ${currentIdx + 1} / ${totalDrills}
+        </div>
+        <button onClick=${togglePause} class="font-mono text-xs uppercase tracking-wider px-3 py-2"
+          style=${'color:' + (paused ? 'var(--flame)' : 'var(--chalk-60)')}>
+          ${paused ? '▶ RESUME' : '⏸ PAUSE'}
+        </button>
+      </div>
+
+      <!-- Main coaching display -->
+      <div class="flex-1 flex flex-col justify-center px-6 py-8 text-center">
+        <!-- Phase pill -->
+        <div class="font-mono text-xs uppercase tracking-widest mb-3"
+          style=${'color:' + phaseColor}>
+          ${phaseLabel} · ${current.sectionLabel}
+        </div>
+
+        <!-- Drill name (huge) -->
+        <div class="font-display text-chalk leading-tight mb-2"
+          style=${'font-size:' + (current.name.length > 20 ? '36px' : '52px')}>
+          ${phase === 'drill' ? current.name : 'Rest'}
+        </div>
+
+        <!-- Reps / sets -->
+        ${phase === 'drill' ? html`
+          <div class="font-mono text-lg text-chalk-60 mb-6">
+            ${current.reps ? current.reps + ' reps' : ''}
+            ${current.sets ? current.sets + ' sets' : ''}
+            ${current.duration ? current.duration : ''}
+          </div>
+        ` : html`
+          <div class="font-mono text-lg text-chalk-60 mb-6">
+            ${next ? 'Next: ' + next.name : 'Final drill'}
+          </div>
+        `}
+
+        <!-- Big timer -->
+        <div class="font-display leading-none my-4"
+          style=${'font-size:120px;color:' + phaseColor + ';font-variant-numeric:tabular-nums'}>
+          ${timeStr}
+        </div>
+
+        <!-- Progress ring (linear bar instead, simpler) -->
+        <div class="bg-courtlight rounded-full h-2 overflow-hidden mx-auto" style="max-width:300px">
+          <div style=${'background:' + phaseColor + ';height:100%;width:' + progressPct + '%;transition:width 1s linear'}></div>
+        </div>
+
+        <!-- Form cue -->
+        ${phase === 'drill' && current.cue ? html`
+          <div class="mt-6 text-sm text-chalk-70 italic max-w-md mx-auto">
+            ${current.cue}
+          </div>
+        ` : null}
+      </div>
+
+      <!-- Bottom controls -->
+      <div class="px-4 py-4 space-y-3" style="border-top:1px solid var(--courtbord)">
+        <button onClick=${skipForward}
+          class="w-full font-display text-xl py-4 rounded-2xl"
+          style=${'background:' + phaseColor + ';color:var(--courtlight)'}>
+          ${phase === 'drill' ? '✓ Done — Start Rest' : '⏭ Skip Rest'}
+        </button>
+        ${phase === 'drill' ? html`
+          <button onClick=${skipDrillEntirely}
+            class="w-full font-mono text-xs uppercase tracking-wider py-3 text-chalk-50">
+            Skip This Drill
+          </button>
+        ` : null}
+      </div>
+    </div>
+  `;
+}
+
 // WORKOUT VIEW
 function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
   let fatigueMod = null;
@@ -1308,6 +1604,7 @@ function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
   const [completed, setCompleted] = useState({});
   const [drillPRs, setDrillPRs] = useState({});
   const [showDrill, setShowDrill] = useState(null);
+  const [coachMode, setCoachMode] = useState(false);
 
   const gameNotice = (() => {
     if (!gameContext) return null;
@@ -1360,6 +1657,33 @@ function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
     ';color:' + (doneCount === 0 ? 'rgba(245,241,232,0.3)' : 'var(--courtlight)') +
     ';border:' + (doneCount === 0 ? '1px solid var(--courtbord)' : 'none');
 
+  // If in coach mode, render the full-screen coach view
+  if (coachMode) {
+    return html`<${CoachMode}
+      workout=${generated}
+      env=${env}
+      prs=${prs}
+      onPRUpdate=${onPRUpdate}
+      onComplete=${(coachCompleted) => {
+        // Merge coach-mode completion state into local state and save
+        setCompleted(c => ({ ...c, ...coachCompleted }));
+        setCoachMode(false);
+        // Slight delay so state updates land
+        setTimeout(() => {
+          // Trigger save with merged state
+          const all = { ...completed, ...coachCompleted };
+          let ftMade = 0, ftAttempts = 0, pushupsTotal = 0;
+          let ftPct = 0;
+          const newPRs = { ...prs };
+          if (Object.keys(newPRs).length > 0) onPRUpdate(newPRs);
+          onSave({ date: todayStr(), day, type: 'training', completed: true,
+            ftMade, ftAttempts, ftPct, pushupsTotal, env,
+            drillsCompleted: Object.keys(all).filter(k => all[k]).length, totalDrills });
+        }, 100);
+      }}
+      onExit=${() => setCoachMode(false)} />`;
+  }
+
   return html`
     <div class="space-y-4 fade-in">
       <button onClick=${onExit} class="font-mono text-xs text-chalk-60 uppercase tracking-wider">← back</button>
@@ -1390,6 +1714,25 @@ function WorkoutView({ day, checkin, env, onSave, onPRUpdate, prs, onExit }) {
           </div>
         ` : null}
       </div>
+
+      <!-- Hands-free coach mode launcher -->
+      ${speechEngine.isSupported() ? html`
+        <button onClick=${() => setCoachMode(true)}
+          class="w-full bg-courtlight border rounded-2xl p-3 flex items-center justify-between"
+          style="border-color:rgba(180,255,58,0.4)">
+          <div class="flex items-center gap-3">
+            <div class="text-2xl">🎧</div>
+            <div class="text-left">
+              <div class="font-display text-base text-chalk leading-tight" style="color:var(--lime)">Hands-Free Mode</div>
+              <div class="font-mono text-10 text-chalk-60 uppercase tracking-wider mt-0.5">
+                Voice coaching · Put in headphones
+              </div>
+            </div>
+          </div>
+          <div class="text-chalk-40 text-xl">›</div>
+        </button>
+      ` : null}
+
       <div class="bg-courtlight border rounded-full h-3 overflow-hidden">
         <div class="progress-bar h-full" style=${'width:' + pct + '%'}></div>
       </div>
@@ -1889,22 +2232,23 @@ function TrainingView({ workouts, prs, stats, badges }) {
             <div class="font-mono text-xs text-flame uppercase tracking-widest">Trophies</div>
             <div class="font-mono text-xs text-chalk-50">${unlockedBadges.length} / ${BADGES.length}</div>
           </div>
-          <div class="grid grid-cols-4 gap-2">
-            ${unlockedBadges.slice(0, 8).map(b => html`
-              <div key=${b.id} class="aspect-square bg-court rounded-xl flex flex-col items-center justify-center p-1"
-                style="border:1px solid rgba(255,107,26,0.5);box-shadow:0 0 12px -4px rgba(255,107,26,0.4)">
-                <div class="text-2xl">${b.icon}</div>
-                <div class="font-display text-8 text-chalk leading-tight text-center mt-1">${b.name}</div>
+          <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+            ${unlockedBadges.map(b => html`
+              <div key=${b.id} class="shrink-0 bg-court rounded-lg flex flex-col items-center justify-center p-2"
+                style="width:62px;height:62px;border:1px solid rgba(255,107,26,0.5);box-shadow:0 0 8px -4px rgba(255,107,26,0.4)">
+                <div style="font-size:22px;line-height:1">${b.icon}</div>
+                <div class="font-mono text-chalk leading-tight text-center mt-1" style="font-size:8px">${b.name}</div>
               </div>
             `)}
           </div>
           ${lockedBadges.length > 0 ? html`
             <div class="mt-3 font-mono text-10 text-chalk-50 uppercase tracking-wider">Up next:</div>
             <div class="flex gap-2 mt-2 overflow-x-auto hide-scrollbar">
-              ${lockedBadges.slice(0, 6).map(b => html`
-                <div key=${b.id} class="shrink-0 bg-court rounded-xl p-2 text-center" style="width:70px;filter:grayscale(1) brightness(0.5);border:1px solid var(--courtbord)">
-                  <div class="text-xl">${b.icon}</div>
-                  <div class="font-mono text-8 text-chalk-60 leading-tight mt-1">${b.name}</div>
+              ${lockedBadges.slice(0, 8).map(b => html`
+                <div key=${b.id} class="shrink-0 bg-court rounded-lg p-2 flex flex-col items-center justify-center text-center"
+                  style="width:62px;height:62px;filter:grayscale(1) brightness(0.5);border:1px solid var(--courtbord)">
+                  <div style="font-size:18px;line-height:1">${b.icon}</div>
+                  <div class="font-mono text-chalk-60 leading-tight mt-1" style="font-size:8px">${b.name}</div>
                 </div>
               `)}
             </div>
