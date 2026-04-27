@@ -523,10 +523,10 @@ function generateWorkout(day, fatigueMod, env, gameContext) {
   if (!template) return null;
 
   // If today's template is "gameday" but user check-in says NO game today,
-  // swap to a normal training template (use Wednesday's template as default training day).
+  // swap to a normal training template (Thursday is full-body skills, good general default).
   // This handles weekends where the kid isn't actually playing.
   if (template.type === 'gameday' && gameContext && gameContext.gameToday === false) {
-    template = WEEKLY_TEMPLATE.wednesday || WEEKLY_TEMPLATE.tuesday || template;
+    template = WEEKLY_TEMPLATE.thursday || WEEKLY_TEMPLATE.tuesday || template;
   }
 
   // GAME-AWARE OVERRIDES — these take priority over fatigueMod
