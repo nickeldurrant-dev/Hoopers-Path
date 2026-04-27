@@ -258,21 +258,44 @@
 <body>
 
 <div id="root"></div>
-<div id="error-display" style="display:none; position:fixed; top:0; left:0; right:0; background:#ff6b1a; color:#0a0e1a; padding:16px; font-family:monospace; font-size:11px; z-index:9999; white-space:pre-wrap; max-height:60vh; overflow:auto;"></div>
+<div id="error-display" style="display:none; position:fixed; bottom:80px; left:8px; right:8px; background:#ff6b1a; color:#0a0e1a; padding:12px 36px 12px 12px; font-family:monospace; font-size:11px; z-index:9999; white-space:pre-wrap; max-height:40vh; overflow:auto; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+  <button id="error-dismiss" style="position:absolute; top:6px; right:8px; background:rgba(0,0,0,0.2); border:none; color:#0a0e1a; width:24px; height:24px; border-radius:50%; cursor:pointer; font-size:14px; line-height:1; padding:0;">×</button>
+  <div id="error-content"></div>
+</div>
 
 <script>
+// Errors that aren't actionable - ignore them (they're usually third-party / browser quirks)
+function isNoiseError(e) {
+  // "Script error." with no file/line is almost always cross-origin script noise
+  if (e.message === 'Script error.' && !e.filename && (!e.lineno || e.lineno === 0)) return true;
+  // ResizeObserver errors are harmless DOM thrash
+  if (e.message && e.message.indexOf('ResizeObserver') !== -1) return true;
+  return false;
+}
+
+document.getElementById('error-dismiss').addEventListener('click', function() {
+  document.getElementById('error-display').style.display = 'none';
+});
+
 window.addEventListener('error', function(e) {
+  if (isNoiseError(e)) return;  // ignore non-actionable errors
   var el = document.getElementById('error-display');
-  if (el) {
+  var content = document.getElementById('error-content');
+  if (el && content) {
     el.style.display = 'block';
-    el.textContent = 'ERROR: ' + e.message + '\nFile: ' + e.filename + '\nLine: ' + e.lineno + ':' + e.colno + '\n\n' + (e.error && e.error.stack ? e.error.stack : '');
+    content.textContent = 'ERROR: ' + e.message + '\nFile: ' + (e.filename || '?') + '\nLine: ' + e.lineno + ':' + e.colno + '\n\n' + (e.error && e.error.stack ? e.error.stack : '');
   }
 });
 window.addEventListener('unhandledrejection', function(e) {
+  // Also ignore promise rejections that are just network blips (Firebase will retry)
+  var msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason);
+  if (msg.indexOf('Failed to fetch') !== -1) return;
+  if (msg.indexOf('NetworkError') !== -1) return;
   var el = document.getElementById('error-display');
-  if (el) {
+  var content = document.getElementById('error-content');
+  if (el && content) {
     el.style.display = 'block';
-    el.textContent = 'PROMISE ERROR: ' + (e.reason && e.reason.message ? e.reason.message : e.reason);
+    content.textContent = 'PROMISE ERROR: ' + msg;
   }
 });
 setTimeout(function() {
@@ -2997,18 +3020,28 @@ function VoiceSection() {
   useEffect(() => {
     speechEngine.init();
     const refreshVoices = () => {
-      const list = speechEngine.getAvailableVoices();
-      setVoices(list);
-      const current = speechEngine.getCurrentVoiceName();
-      if (current && !selected) setSelected(current);
+      try {
+        const list = speechEngine.getAvailableVoices();
+        setVoices(list);
+        const current = speechEngine.getCurrentVoiceName();
+        if (current && !selected) setSelected(current);
+      } catch (e) { console.warn('Voice refresh:', e); }
     };
     refreshVoices();
-    // iOS may load voices async
-    if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
-      const handler = () => refreshVoices();
-      window.speechSynthesis.addEventListener('voiceschanged', handler);
-      return () => window.speechSynthesis.removeEventListener('voiceschanged', handler);
-    }
+    // iOS may load voices async — but addEventListener is sometimes flaky on iOS
+    try {
+      if ('speechSynthesis' in window && typeof window.speechSynthesis.addEventListener === 'function') {
+        const handler = () => refreshVoices();
+        window.speechSynthesis.addEventListener('voiceschanged', handler);
+        return () => {
+          try { window.speechSynthesis.removeEventListener('voiceschanged', handler); } catch {}
+        };
+      } else if ('speechSynthesis' in window) {
+        // Fallback to onvoiceschanged property
+        const prev = window.speechSynthesis.onvoiceschanged;
+        window.speechSynthesis.onvoiceschanged = () => { if (prev) prev(); refreshVoices(); };
+      }
+    } catch (e) { console.warn('Voice listener setup:', e); }
   }, []);
 
   if (!speechEngine.isSupported()) {

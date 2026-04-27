@@ -1,5 +1,5 @@
 // Hooper's Path service worker - network-first for HTML, cache-first for assets
-const CACHE_NAME = 'hoopers-path-v25';
+const CACHE_NAME = 'hoopers-path-v26';
 const ASSETS = [
   './',
   './index.html',
